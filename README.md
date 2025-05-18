@@ -10,7 +10,7 @@ A MATLAB-based 2D deformable–polygon model (DPM) for “squishy” particles, 
 
 | ![Gravity](GIFs/Gravity.gif) | ![Pure Shear](GIFs/PureShear.gif)  | 
 |------------------------------|-------------------------------------|
-| ![Hex Couette](GIFs/HexCouette.gif) | ![Hex Couette Soft](GIFs/HexCouetteSoft.gif) |
+| ![Hex Couette](GIFs/HexCouette.gif) | ![Hex Couette Soft](GIFs/HexCouette_Soft.gif) |
 | ![Simple Shear Medium](GIFs/SimpleShearMedium.gif) | ![Simple Shear Stiff](GIFs/SimpleShearStiff.gif) | 
 
 
