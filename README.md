@@ -1,6 +1,6 @@
 # Squishy Particle Simulator
 
-> Note: I've just been monkeying around with this for a few months and got it up running. I haven't done much with it and wrote the code around Feb-May of 2024. The text below was written by ChatGPT o4 high reasoning model (one shot) without edits from me. It read the code and the reference below, and based on its interpretation wrote this document.
+> Note: I've just been monkeying around with this for a few months and got it up running. I haven't done much with it and wrote the code around Feb-May of 2024. The text below was written by ChatGPT o4 high reasoning model (one shot) without edits from me. ChatGPT read the code and the reference below, and used it to write this document.
 
 A MATLAB-based 2D deformable–polygon model (DPM) for “squishy” particles, where each particle’s perimeter is discretized into vertices and bending moments penalize deviations from its equilibrium shape. This repository includes example scripts, core engine functions, and pre-rendered looping GIFs to showcase different deformation and flow scenarios.
 
