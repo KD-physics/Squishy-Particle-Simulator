@@ -1,6 +1,18 @@
 # Squishy Particle Simulator
 
+> Note: I've just been monkeying around with this for a few months and got it up running. I haven't done much with it and wrote the code around Feb-May of 2024. The text below was written by ChatGPT o4 high reasoning model (one shot) without edits from me. It read the code and the reference below, and based on its interpretation wrote this document.
+
 A MATLAB-based 2D deformable–polygon model (DPM) for “squishy” particles, where each particle’s perimeter is discretized into vertices and bending moments penalize deviations from its equilibrium shape. This repository includes example scripts, core engine functions, and pre-rendered looping GIFs to showcase different deformation and flow scenarios.
+
+---
+
+## 🎬 Demonstrations
+
+| ![Gravity](GIFs/Gravity.gif) | ![Pure Shear](GIFs/PureShear.gif)  | 
+|------------------------------|-------------------------------------|
+| ![Hex Couette](GIFs/HexCouette.gif) | ![Hex Couette Soft](GIFs/HexCouetteSoft.gif) |
+| ![Simple Shear Medium](GIFs/SimpleShearMedium.gif) | ![Simple Shear Stiff](GIFs/SimpleShearStiff.gif) | 
+
 
 ---
 
@@ -56,21 +68,6 @@ root/
 
 ---
 
-## 🎬 Demonstrations
-
-### Gravity‐Driven Sedimentation  
-![Gravity.gif](GIFs/Gravity.gif)
-
-### Hexagonal Couette Cell (Soft Particles)  
-![HexCouetteSoft.gif](GIFs/HexCouetteSoft.gif)
-
-### Simple Shear: Medium, Soft, and Stiff Regimes  
-![SimpleShearMedium.gif](GIFs/SimpleShearMedium.gif)  
-![SimpleShearSoft.gif](GIFs/SimpleShearSoft.gif)  
-![SimpleShearStiff.gif](GIFs/SimpleShearStiff.gif)
-
----
-
 ## ⚙️ Model Differences
 
 - **O’Hern vertex model** uses a perimeter‐penalty term  
@@ -89,4 +86,7 @@ root/
 ## 📚 References
 
 - Boromand, A., Signoriello, A., Ye, F., O’Hern, C. S., & Shattuck, M. D. (2018). *Jamming of Deformable Polygons*. Phys. Rev. E, **97**, 062903. citeturn0file3
+
+
+
 
