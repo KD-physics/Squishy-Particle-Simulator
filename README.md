@@ -21,6 +21,7 @@ Our simulator implements the **Deformable Particle Model (DPM)** introduced by B
 - **Area elasticity** – quadratic penalty for deviations from their preferred area.  
 - **Bending elasticity** – quadratic penalty for changes in the angle between adjacent perimeter segments.  
 - **Repulsive contacts** – pairwise overlap forces to prevent interpenetration.
+- **Walls** - Walls are modeled as line segements and arcs with repulsive interactions. They can be placed anywhere and assigned a trajectory.
 
 ---
 
