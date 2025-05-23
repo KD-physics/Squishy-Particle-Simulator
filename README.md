@@ -106,7 +106,7 @@ The elastic shell is discretized into `N_s` segments of equal length `L` (comput
 
 ## 📚 References
 
-- Boromand, A., Signoriello, A., Ye, F., O’Hern, C. S., & Shattuck, M. D. (2018). *Jamming of Deformable Polygons*. Phys. Rev. E, **97**, 062903. citeturn0file3
+- Boromand, A., Signoriello, A., Ye, F., O’Hern, C. S., & Shattuck, M. D. (2018). *Jamming of Deformable Polygons*. Phys. Rev. E, **97**, 062903.
 
 ---
 
