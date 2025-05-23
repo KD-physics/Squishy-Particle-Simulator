@@ -16,7 +16,7 @@ A MATLAB-based 2D deformable–polygon model (DPM) for “squishy” particles, 
 
 ## 📖 Overview
 
-Our simulator implements the **Deformable Particle Model (DPM)** introduced by Boromand *et al.* for jammed packings of deformable polygons, but replaces the standard perimeter‐penalty term with a **bending‐moment** energy that directly penalizes curvature deviations from the equilibrium shape citeturn0file3. Particles interact via:
+Our simulator implements the **Deformable Particle Model (DPM)** introduced by Boromand *et al.* for jammed packings of deformable polygons, but replaces the standard perimeter‐penalty term with a **bending‐moment** energy that directly penalizes curvature deviations from the equilibrium shape. Particles interact via:
 
 - **Area elasticity** – quadratic penalty for deviations from their preferred area.  
 - **Bending elasticity** – quadratic penalty for changes in the angle between adjacent perimeter segments.  
