@@ -1,3 +1,5 @@
+[🏠 Home](https://kd-physics.github.io/)
+
 # Squishy Particle Simulator
 
 A MATLAB-based 2D deformable–polygon model (DPM) for “squishy” particles, where each particle’s perimeter is discretized into vertices and bending moments penalize deviations from its equilibrium shape. This repository includes example scripts, core engine functions, and pre-rendered looping GIFs to showcase different deformation and flow scenarios.
