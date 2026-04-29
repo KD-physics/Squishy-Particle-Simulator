@@ -1,0 +1,254 @@
+% references.bib — bibliography for EPD model paper
+% Populate as citations are needed
+
+% Jamming / soft-sphere DEM
+@article{OHern2003,
+  author  = {O'Hern, C. S. and Silbert, L. E. and Liu, A. J. and Nagel, S. R.},
+  title   = {Jamming at zero temperature and zero applied stress: The epitome of disorder},
+  journal = {Phys. Rev. E},
+  volume  = {68},
+  pages   = {011306},
+  year    = {2003}
+}
+
+@article{vanHecke2010,
+  author  = {van Hecke, M.},
+  title   = {Jamming of soft particles: geometry, mechanics, scaling and isostaticity},
+  journal = {J. Phys.: Condens. Matter},
+  volume  = {22},
+  pages   = {033101},
+  year    = {2010}
+}
+
+% Deformable particle DEM
+@article{Boromand2018,
+  author  = {Boromand, A. and Signoriello, A. and Ye, F. and O'Hern, C. S. and Shattuck, M. D.},
+  title   = {Jamming of deformable polygons},
+  journal = {Phys. Rev. Lett.},
+  volume  = {121},
+  pages   = {248003},
+  year    = {2018}
+}
+
+@article{Treado2021,
+  author  = {Treado, J. D. and Wang, D. and Boromand, A. and Murrell, M. P. and Shattuck, M. D. and O'Hern, C. S.},
+  title   = {Bridging particle deformability and collective response in soft solids},
+  journal = {Phys. Rev. Mater.},
+  volume  = {5},
+  pages   = {055605},
+  year    = {2021}
+}
+
+% IPC / FEM contact
+@article{Li2020IPC,
+  author  = {Li, M. and Ferguson, Z. and Schneider, T. and Langlois, T. and Zorin, D. and Panozzo, D. and Jiang, C. and Kaufman, D. M.},
+  title   = {{Incremental Potential Contact}: Intersection- and inversion-free, large-deformation dynamics},
+  journal = {ACM Trans. Graph.},
+  volume  = {39},
+  number  = {4},
+  pages   = {49},
+  year    = {2020}
+}
+
+% Shell / membrane mechanics
+@book{Landau1986,
+  author    = {Landau, L. D. and Lifshitz, E. M.},
+  title     = {Theory of Elasticity},
+  edition   = {3rd},
+  publisher = {Butterworth-Heinemann},
+  year      = {1986}
+}
+
+% Hertz contact (2D)
+@book{Johnson1985,
+  author    = {Johnson, K. L.},
+  title     = {Contact Mechanics},
+  publisher = {Cambridge University Press},
+  year      = {1985}
+}
+
+% Deformable model decomposition (rigid + elastic) and active contour energy
+@inproceedings{Terzopoulos1987,
+  author    = {Terzopoulos, D. and Platt, J. and Barr, A. and Fleischer, K.},
+  title     = {Elastically deformable models},
+  booktitle = {Proc. SIGGRAPH '87},
+  series    = {ACM Comput. Graph.},
+  volume    = {21},
+  pages     = {205--214},
+  year      = {1987}
+}
+
+@article{Kass1988,
+  author  = {Kass, M. and Witkin, A. and Terzopoulos, D.},
+  title   = {Snakes: Active contour models},
+  journal = {Int. J. Comput. Vision},
+  volume  = {1},
+  number  = {4},
+  pages   = {321--331},
+  year    = {1988}
+}
+
+% Polar decomposition / continuum mechanics
+@book{Gurtin1981,
+  author    = {Gurtin, M. E.},
+  title     = {An Introduction to Continuum Mechanics},
+  publisher = {Academic Press},
+  year      = {1981}
+}
+
+% Euler--Bernoulli ring vibration
+@book{Soedel2004,
+  author    = {Soedel, W.},
+  title     = {Vibrations of Shells and Plates},
+  edition   = {3rd},
+  publisher = {Marcel Dekker},
+  year      = {2004}
+}
+
+@article{Wah1962,
+  author  = {Wah, T.},
+  title   = {Vibration of circular rings},
+  journal = {J. Acoust. Soc. Am.},
+  volume  = {34},
+  pages   = {275--281},
+  year    = {1962}
+}
+
+% DEM collision / rigid-body integration
+@article{Luding1998,
+  author  = {Luding, S.},
+  title   = {Collisions \& contacts between two particles},
+  journal = {Physics of Dry Granular Media},
+  editor  = {Herrmann, H. J. and Hovi, J.-P. and Luding, S.},
+  pages   = {285--304},
+  year    = {1998}
+}
+
+% Code references (this work)
+@misc{directimpulse_code,
+  author = {Research Note},
+  title  = {\texttt{src/validation/direct\_impulse\_test.py}},
+  note   = {This work. Results in
+            \texttt{results/direct\_impulse/direct\_impulse\_results.json}},
+  year   = {2026}
+}
+
+@misc{ellipse_code,
+  author = {Research Note},
+  title  = {\texttt{src/simulation/ellipse\_particle.py},
+            \texttt{src/validation/ellipse\_collision\_benchmark.py}},
+  note   = {This work. Results in
+            \texttt{results/ellipse\_benchmarks/ellipse\_conservation.json}},
+  year   = {2026}
+}
+
+@misc{extension_code,
+  author = {Research Note},
+  title  = {\texttt{src/validation/rb\_extension\_benchmarks.py}},
+  note   = {This work. Results in
+            \texttt{results/rb\_benchmarks/extension\_benchmarks.json}},
+  year   = {2026}
+}
+
+@misc{contactforce_code,
+  author = {Research Note},
+  title  = {\texttt{src/validation/contact\_force\_analysis.py}},
+  note   = {This work. Results in
+            \texttt{results/contact\_force/contact\_force\_results.json}},
+  year   = {2026}
+}
+
+% Emulsion / droplet mechanics references
+@book{Pozrikidis1992,
+  author    = {Pozrikidis, C.},
+  title     = {Boundary Integral and Singularity Methods for Linearized Viscous Flow},
+  publisher = {Cambridge University Press},
+  year      = {1992}
+}
+
+@book{Lamb1932,
+  author    = {Lamb, H.},
+  title     = {Hydrodynamics},
+  edition   = {6th},
+  publisher = {Cambridge University Press},
+  year      = {1932}
+}
+
+@article{Weaire1984,
+  author  = {Weaire, D. and Kermode, J. P.},
+  title   = {Computer simulation of a two-dimensional soap froth. {II}. Analysis of results},
+  journal = {Phil. Mag. B},
+  volume  = {50},
+  pages   = {379--395},
+  year    = {1984}
+}
+
+@misc{dampcalib_code,
+  author = {Research Note},
+  title  = {\texttt{src/validation/shell\_mode\_calibration.py}},
+  note   = {This work. Results in
+            \texttt{results/shell\_mode\_calibration/calibration\_results.json}},
+  year   = {2026}
+}
+
+% ── Viscous drag / Resistive Force Theory ────────────────────────────────────
+
+@article{GrayHancock1955,
+  author  = {Gray, J. and Hancock, G. J.},
+  title   = {The propulsion of sea-urchin spermatozoa},
+  journal = {J. Exp. Biol.},
+  volume  = {32},
+  pages   = {802--814},
+  year    = {1955}
+}
+
+@article{LaugaPowers2009,
+  author  = {Lauga, E. and Powers, T. R.},
+  title   = {The hydrodynamics of swimming microorganisms},
+  journal = {Rep. Prog. Phys.},
+  volume  = {72},
+  pages   = {096601},
+  year    = {2009}
+}
+
+@article{Ohnesorge1936,
+  author  = {Ohnesorge, W. von},
+  title   = {Formation of drops by nozzles and the breakup of liquid jets},
+  journal = {Z. Angew. Math. Mech.},
+  volume  = {16},
+  pages   = {355--358},
+  year    = {1936}
+}
+
+@article{EggersVillermaux2008,
+  author  = {Eggers, J. and Villermaux, E.},
+  title   = {Physics of liquid jets},
+  journal = {Rep. Prog. Phys.},
+  volume  = {71},
+  pages   = {036601},
+  year    = {2008}
+}
+
+@article{Jeffery1922,
+  author  = {Jeffery, G. B.},
+  title   = {The motion of ellipsoidal particles immersed in a viscous fluid},
+  journal = {Proc. R. Soc. Lond. A},
+  volume  = {102},
+  pages   = {161--179},
+  year    = {1922}
+}
+
+@book{KimKarrila1991,
+  author    = {Kim, S. and Karrila, S. J.},
+  title     = {Microhydrodynamics: Principles and Selected Applications},
+  publisher = {Butterworth-Heinemann},
+  year      = {1991}
+}
+
+@misc{drag_code,
+  author = {Research Note},
+  title  = {\texttt{src/validation/test\_E\_stokes\_drag.py},
+            \texttt{papers/summary\_of\_methods/scripts/test\_E\_stokes\_drag.py}},
+  note   = {This work. Benchmarks E1--E4 for viscous drag validation},
+  year   = {2026}
+}

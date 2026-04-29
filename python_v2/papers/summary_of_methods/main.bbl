@@ -1,0 +1,276 @@
+%apsrev4-2.bst 2019-01-14 (MD) hand-edited version of apsrev4-1.bst
+%Control: key (0)
+%Control: author (8) initials jnrlst
+%Control: editor formatted (1) identically to author
+%Control: production of article title (0) allowed
+%Control: page (0) single
+%Control: year (1) truncated
+%Control: production of eprint (0) enabled
+\begin{thebibliography}{25}%
+\makeatletter
+\providecommand \@ifxundefined [1]{%
+ \@ifx{#1\undefined}
+}%
+\providecommand \@ifnum [1]{%
+ \ifnum #1\expandafter \@firstoftwo
+ \else \expandafter \@secondoftwo
+ \fi
+}%
+\providecommand \@ifx [1]{%
+ \ifx #1\expandafter \@firstoftwo
+ \else \expandafter \@secondoftwo
+ \fi
+}%
+\providecommand \natexlab [1]{#1}%
+\providecommand \enquote  [1]{``#1''}%
+\providecommand \bibnamefont  [1]{#1}%
+\providecommand \bibfnamefont [1]{#1}%
+\providecommand \citenamefont [1]{#1}%
+\providecommand \href@noop [0]{\@secondoftwo}%
+\providecommand \href [0]{\begingroup \@sanitize@url \@href}%
+\providecommand \@href[1]{\@@startlink{#1}\@@href}%
+\providecommand \@@href[1]{\endgroup#1\@@endlink}%
+\providecommand \@sanitize@url [0]{\catcode `\\12\catcode `\$12\catcode
+  `\&12\catcode `\#12\catcode `\^12\catcode `\_12\catcode `\%12\relax}%
+\providecommand \@@startlink[1]{}%
+\providecommand \@@endlink[0]{}%
+\providecommand \url  [0]{\begingroup\@sanitize@url \@url }%
+\providecommand \@url [1]{\endgroup\@href {#1}{\urlprefix }}%
+\providecommand \urlprefix  [0]{URL }%
+\providecommand \Eprint [0]{\href }%
+\providecommand \doibase [0]{https://doi.org/}%
+\providecommand \selectlanguage [0]{\@gobble}%
+\providecommand \bibinfo  [0]{\@secondoftwo}%
+\providecommand \bibfield  [0]{\@secondoftwo}%
+\providecommand \translation [1]{[#1]}%
+\providecommand \BibitemOpen [0]{}%
+\providecommand \bibitemStop [0]{}%
+\providecommand \bibitemNoStop [0]{.\EOS\space}%
+\providecommand \EOS [0]{\spacefactor3000\relax}%
+\providecommand \BibitemShut  [1]{\csname bibitem#1\endcsname}%
+\let\auto@bib@innerbib\@empty
+%</preamble>
+\bibitem [{\citenamefont {O'Hern}\ \emph {et~al.}(2003)\citenamefont {O'Hern},
+  \citenamefont {Silbert}, \citenamefont {Liu},\ and\ \citenamefont
+  {Nagel}}]{OHern2003}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {C.~S.}\ \bibnamefont
+  {O'Hern}}, \bibinfo {author} {\bibfnamefont {L.~E.}\ \bibnamefont {Silbert}},
+  \bibinfo {author} {\bibfnamefont {A.~J.}\ \bibnamefont {Liu}},\ and\ \bibinfo
+  {author} {\bibfnamefont {S.~R.}\ \bibnamefont {Nagel}},\ }\bibfield  {title}
+  {\bibinfo {title} {Jamming at zero temperature and zero applied stress: The
+  epitome of disorder},\ }\href@noop {} {\bibfield  {journal} {\bibinfo
+  {journal} {Phys. Rev. E}\ }\textbf {\bibinfo {volume} {68}},\ \bibinfo
+  {pages} {011306} (\bibinfo {year} {2003})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {van Hecke}(2010)}]{vanHecke2010}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {M.}~\bibnamefont {van
+  Hecke}},\ }\bibfield  {title} {\bibinfo {title} {Jamming of soft particles:
+  geometry, mechanics, scaling and isostaticity},\ }\href@noop {} {\bibfield
+  {journal} {\bibinfo  {journal} {J. Phys.: Condens. Matter}\ }\textbf
+  {\bibinfo {volume} {22}},\ \bibinfo {pages} {033101} (\bibinfo {year}
+  {2010})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Li}\ \emph {et~al.}(2020)\citenamefont {Li},
+  \citenamefont {Ferguson}, \citenamefont {Schneider}, \citenamefont
+  {Langlois}, \citenamefont {Zorin}, \citenamefont {Panozzo}, \citenamefont
+  {Jiang},\ and\ \citenamefont {Kaufman}}]{Li2020IPC}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {M.}~\bibnamefont
+  {Li}}, \bibinfo {author} {\bibfnamefont {Z.}~\bibnamefont {Ferguson}},
+  \bibinfo {author} {\bibfnamefont {T.}~\bibnamefont {Schneider}}, \bibinfo
+  {author} {\bibfnamefont {T.}~\bibnamefont {Langlois}}, \bibinfo {author}
+  {\bibfnamefont {D.}~\bibnamefont {Zorin}}, \bibinfo {author} {\bibfnamefont
+  {D.}~\bibnamefont {Panozzo}}, \bibinfo {author} {\bibfnamefont
+  {C.}~\bibnamefont {Jiang}},\ and\ \bibinfo {author} {\bibfnamefont {D.~M.}\
+  \bibnamefont {Kaufman}},\ }\bibfield  {title} {\bibinfo {title} {{Incremental
+  Potential Contact}: Intersection- and inversion-free, large-deformation
+  dynamics},\ }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal} {ACM
+  Trans. Graph.}\ }\textbf {\bibinfo {volume} {39}},\ \bibinfo {pages} {49}
+  (\bibinfo {year} {2020})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Treado}\ \emph {et~al.}(2021)\citenamefont {Treado},
+  \citenamefont {Wang}, \citenamefont {Boromand}, \citenamefont {Murrell},
+  \citenamefont {Shattuck},\ and\ \citenamefont {O'Hern}}]{Treado2021}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {J.~D.}\ \bibnamefont
+  {Treado}}, \bibinfo {author} {\bibfnamefont {D.}~\bibnamefont {Wang}},
+  \bibinfo {author} {\bibfnamefont {A.}~\bibnamefont {Boromand}}, \bibinfo
+  {author} {\bibfnamefont {M.~P.}\ \bibnamefont {Murrell}}, \bibinfo {author}
+  {\bibfnamefont {M.~D.}\ \bibnamefont {Shattuck}},\ and\ \bibinfo {author}
+  {\bibfnamefont {C.~S.}\ \bibnamefont {O'Hern}},\ }\bibfield  {title}
+  {\bibinfo {title} {Bridging particle deformability and collective response in
+  soft solids},\ }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal}
+  {Phys. Rev. Mater.}\ }\textbf {\bibinfo {volume} {5}},\ \bibinfo {pages}
+  {055605} (\bibinfo {year} {2021})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Kass}\ \emph {et~al.}(1988)\citenamefont {Kass},
+  \citenamefont {Witkin},\ and\ \citenamefont {Terzopoulos}}]{Kass1988}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {M.}~\bibnamefont
+  {Kass}}, \bibinfo {author} {\bibfnamefont {A.}~\bibnamefont {Witkin}},\ and\
+  \bibinfo {author} {\bibfnamefont {D.}~\bibnamefont {Terzopoulos}},\
+  }\bibfield  {title} {\bibinfo {title} {Snakes: Active contour models},\
+  }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal} {Int. J. Comput.
+  Vision}\ }\textbf {\bibinfo {volume} {1}},\ \bibinfo {pages} {321} (\bibinfo
+  {year} {1988})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Landau}\ and\ \citenamefont
+  {Lifshitz}(1986)}]{Landau1986}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {L.~D.}\ \bibnamefont
+  {Landau}}\ and\ \bibinfo {author} {\bibfnamefont {E.~M.}\ \bibnamefont
+  {Lifshitz}},\ }\href@noop {} {\emph {\bibinfo {title} {Theory of
+  Elasticity}}},\ \bibinfo {edition} {3rd}\ ed.\ (\bibinfo  {publisher}
+  {Butterworth-Heinemann},\ \bibinfo {year} {1986})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Gurtin}(1981)}]{Gurtin1981}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {M.~E.}\ \bibnamefont
+  {Gurtin}},\ }\href@noop {} {\emph {\bibinfo {title} {An Introduction to
+  Continuum Mechanics}}}\ (\bibinfo  {publisher} {Academic Press},\ \bibinfo
+  {year} {1981})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Terzopoulos}\ \emph {et~al.}(1987)\citenamefont
+  {Terzopoulos}, \citenamefont {Platt}, \citenamefont {Barr},\ and\
+  \citenamefont {Fleischer}}]{Terzopoulos1987}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {D.}~\bibnamefont
+  {Terzopoulos}}, \bibinfo {author} {\bibfnamefont {J.}~\bibnamefont {Platt}},
+  \bibinfo {author} {\bibfnamefont {A.}~\bibnamefont {Barr}},\ and\ \bibinfo
+  {author} {\bibfnamefont {K.}~\bibnamefont {Fleischer}},\ }\bibfield  {title}
+  {\bibinfo {title} {Elastically deformable models},\ }in\ \href@noop {} {\emph
+  {\bibinfo {booktitle} {Proc. SIGGRAPH '87}}},\ \bibinfo {series} {ACM Comput.
+  Graph.}, Vol.~\bibinfo {volume} {21}\ (\bibinfo {year} {1987})\ pp.\ \bibinfo
+  {pages} {205--214}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{a}})}]{directimpulse_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/validation/direct\_impulse\_test.py}}} (\bibinfo {year}
+  {2026}{\natexlab{a}}),\ \bibinfo {note} {this work. Results in
+  \texttt{results/direct\_impulse/direct\_impulse\_results.json}}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{b}})}]{extension_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/validation/rb\_extension\_benchmarks.py}}} (\bibinfo {year}
+  {2026}{\natexlab{b}}),\ \bibinfo {note} {this work. Results in
+  \texttt{results/rb\_benchmarks/extension\_benchmarks.json}}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{c}})}]{ellipse_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/simulation/ellipse\_particle.py},
+  \texttt{src/validation/ellipse\_collision\_benchmark.py}}} (\bibinfo {year}
+  {2026}{\natexlab{c}}),\ \bibinfo {note} {this work. Results in
+  \texttt{results/ellipse\_benchmarks/ellipse\_conservation.json}}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{d}})}]{contactforce_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/validation/contact\_force\_analysis.py}}} (\bibinfo {year}
+  {2026}{\natexlab{d}}),\ \bibinfo {note} {this work. Results in
+  \texttt{results/contact\_force/contact\_force\_results.json}}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Soedel}(2004)}]{Soedel2004}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {W.}~\bibnamefont
+  {Soedel}},\ }\href@noop {} {\emph {\bibinfo {title} {Vibrations of Shells and
+  Plates}}},\ \bibinfo {edition} {3rd}\ ed.\ (\bibinfo  {publisher} {Marcel
+  Dekker},\ \bibinfo {year} {2004})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Wah}(1962)}]{Wah1962}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {T.}~\bibnamefont
+  {Wah}},\ }\bibfield  {title} {\bibinfo {title} {Vibration of circular
+  rings},\ }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal} {J.
+  Acoust. Soc. Am.}\ }\textbf {\bibinfo {volume} {34}},\ \bibinfo {pages} {275}
+  (\bibinfo {year} {1962})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{e}})}]{dampcalib_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/validation/shell\_mode\_calibration.py}}} (\bibinfo {year}
+  {2026}{\natexlab{e}}),\ \bibinfo {note} {this work. Results in
+  \texttt{results/shell\_mode\_calibration/calibration\_results.json}}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Pozrikidis}(1992)}]{Pozrikidis1992}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {C.}~\bibnamefont
+  {Pozrikidis}},\ }\href@noop {} {\emph {\bibinfo {title} {Boundary Integral
+  and Singularity Methods for Linearized Viscous Flow}}}\ (\bibinfo
+  {publisher} {Cambridge University Press},\ \bibinfo {year}
+  {1992})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Lamb}(1932)}]{Lamb1932}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {H.}~\bibnamefont
+  {Lamb}},\ }\href@noop {} {\emph {\bibinfo {title} {Hydrodynamics}}},\
+  \bibinfo {edition} {6th}\ ed.\ (\bibinfo  {publisher} {Cambridge University
+  Press},\ \bibinfo {year} {1932})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Weaire}\ and\ \citenamefont
+  {Kermode}(1984)}]{Weaire1984}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {D.}~\bibnamefont
+  {Weaire}}\ and\ \bibinfo {author} {\bibfnamefont {J.~P.}\ \bibnamefont
+  {Kermode}},\ }\bibfield  {title} {\bibinfo {title} {Computer simulation of a
+  two-dimensional soap froth. {II}. analysis of results},\ }\href@noop {}
+  {\bibfield  {journal} {\bibinfo  {journal} {Phil. Mag. B}\ }\textbf {\bibinfo
+  {volume} {50}},\ \bibinfo {pages} {379} (\bibinfo {year} {1984})}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Gray}\ and\ \citenamefont
+  {Hancock}(1955)}]{GrayHancock1955}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {J.}~\bibnamefont
+  {Gray}}\ and\ \bibinfo {author} {\bibfnamefont {G.~J.}\ \bibnamefont
+  {Hancock}},\ }\bibfield  {title} {\bibinfo {title} {The propulsion of
+  sea-urchin spermatozoa},\ }\href@noop {} {\bibfield  {journal} {\bibinfo
+  {journal} {J. Exp. Biol.}\ }\textbf {\bibinfo {volume} {32}},\ \bibinfo
+  {pages} {802} (\bibinfo {year} {1955})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Lauga}\ and\ \citenamefont
+  {Powers}(2009)}]{LaugaPowers2009}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {E.}~\bibnamefont
+  {Lauga}}\ and\ \bibinfo {author} {\bibfnamefont {T.~R.}\ \bibnamefont
+  {Powers}},\ }\bibfield  {title} {\bibinfo {title} {The hydrodynamics of
+  swimming microorganisms},\ }\href@noop {} {\bibfield  {journal} {\bibinfo
+  {journal} {Rep. Prog. Phys.}\ }\textbf {\bibinfo {volume} {72}},\ \bibinfo
+  {pages} {096601} (\bibinfo {year} {2009})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Kim}\ and\ \citenamefont
+  {Karrila}(1991)}]{KimKarrila1991}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {S.}~\bibnamefont
+  {Kim}}\ and\ \bibinfo {author} {\bibfnamefont {S.~J.}\ \bibnamefont
+  {Karrila}},\ }\href@noop {} {\emph {\bibinfo {title} {Microhydrodynamics:
+  Principles and Selected Applications}}}\ (\bibinfo  {publisher}
+  {Butterworth-Heinemann},\ \bibinfo {year} {1991})\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Ohnesorge}(1936)}]{Ohnesorge1936}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {W.~v.}\ \bibnamefont
+  {Ohnesorge}},\ }\bibfield  {title} {\bibinfo {title} {Formation of drops by
+  nozzles and the breakup of liquid jets},\ }\href@noop {} {\bibfield
+  {journal} {\bibinfo  {journal} {Z. Angew. Math. Mech.}\ }\textbf {\bibinfo
+  {volume} {16}},\ \bibinfo {pages} {355} (\bibinfo {year} {1936})}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Eggers}\ and\ \citenamefont
+  {Villermaux}(2008)}]{EggersVillermaux2008}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {J.}~\bibnamefont
+  {Eggers}}\ and\ \bibinfo {author} {\bibfnamefont {E.}~\bibnamefont
+  {Villermaux}},\ }\bibfield  {title} {\bibinfo {title} {Physics of liquid
+  jets},\ }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal} {Rep. Prog.
+  Phys.}\ }\textbf {\bibinfo {volume} {71}},\ \bibinfo {pages} {036601}
+  (\bibinfo {year} {2008})}\BibitemShut {NoStop}%
+\bibitem [{\citenamefont {Jeffery}(1922)}]{Jeffery1922}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {G.~B.}\ \bibnamefont
+  {Jeffery}},\ }\bibfield  {title} {\bibinfo {title} {The motion of ellipsoidal
+  particles immersed in a viscous fluid},\ }\href@noop {} {\bibfield  {journal}
+  {\bibinfo  {journal} {Proc. R. Soc. Lond. A}\ }\textbf {\bibinfo {volume}
+  {102}},\ \bibinfo {pages} {161} (\bibinfo {year} {1922})}\BibitemShut
+  {NoStop}%
+\bibitem [{\citenamefont {Note}(2026{\natexlab{f}})}]{drag_code}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {R.}~\bibnamefont
+  {Note}},\ }\href@noop {} {\bibinfo {title}
+  {\texttt{src/validation/test\_E\_stokes\_drag.py},
+  \texttt{papers/summary\_of\_methods/scripts/test\_E\_stokes\_drag.py}}}
+  (\bibinfo {year} {2026}{\natexlab{f}}),\ \bibinfo {note} {this work.
+  Benchmarks E1--E4 for viscous drag validation}\BibitemShut {NoStop}%
+\end{thebibliography}%
