@@ -1,0 +1,6 @@
+numpy
+scipy
+matplotlib
+pandas
+imageio
+tensorflow>=2.12
