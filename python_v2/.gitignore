@@ -1,0 +1,46 @@
+# ── Simulation outputs (large; regenerable; never to git) ───────────────────
+results/
+*.npz
+*.gif
+*.mp4
+*.webm
+*.mov
+
+# ── Python build / cache ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+*.so
+*.pyd
+
+# ── Editor / IDE / OS ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+.ipynb_checkpoints/
+
+# ── Claude Code session state (machine-specific) ────────────────────────────
+.claude/
+
+# ── LaTeX build artifacts (keep .tex sources and committed .pdf, ignore aux) ─
+papers/**/*.aux
+papers/**/*.log
+papers/**/*.out
+papers/**/*.bbl
+papers/**/*.blg
+papers/**/*.synctex.gz
+papers/**/*Notes.bib
+papers/**/*.fdb_latexmk
+papers/**/*.fls
+papers/**/*.toc
+
+# ── Specifically allow committed reference figures and the standalone PNG ───
+!papers/**/figures/
+!papers/**/figures/*.png
+!papers/**/figures/*.pdf
+!force_log_example.png

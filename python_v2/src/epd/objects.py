@@ -668,15 +668,21 @@ class CouetteCell(CompositeObject):
         return self._inner_r < r < self._outer_r
 
     def exclusion_area(self, t=0.0):
-        """Area excluded from the enclosing (2*R_outer)² bounding box.
+        """Inner-disk area only.
 
-        = corner area (outside outer circle) + inner disk area
-        = 4*R_outer² − π*(R_outer² − R_inner²)
+        ``System._accessible_area()`` already replaces the box area Lx*Ly with
+        the outer container polygon area (≈ π·R_outer²) via
+        ``base = min(Lx*Ly, container_polygon_area)``. So the corners outside
+        the outer circle are *already* removed from the accessible-area
+        denominator. The exclusion contribution from this object is therefore
+        only the inner disk:
 
-        Assumes the System box is exactly 2*R_outer × 2*R_outer, so that
-        System._accessible_area() = π*(R_outer² − R_inner²).
+            accessible = π·R_outer² − π·R_inner² = π·(R_outer² − R_inner²)
+
+        (Previously this also subtracted the corners again, which made the
+        denominator ~1.4× too small and `phi_outer` ~1.4× too high.)
         """
-        return 4.0 * self._outer_r**2 - np.pi * (self._outer_r**2 - self._inner_r**2)
+        return np.pi * self._inner_r ** 2
 
     def rescale(self, f):
         """Scale radii and origin by f (called at each swell compression step)."""

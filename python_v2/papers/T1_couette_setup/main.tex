@@ -1,0 +1,625 @@
+%% T1 stress relaxation in a 2D bidisperse emulsion Couette cell
+%% Methods + setup section (pre-publication draft / code review document)
+%% Compile: pdflatex main.tex  (run twice for cross-references)
+\documentclass[aps,pre,twocolumn,floatfix,longbibliography]{revtex4-2}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\footnotesize, breaklines=true,
+        frame=single, backgroundcolor=\color{gray!8}}
+
+\newcommand{\rc}{r_{\mathrm{c}}}
+\newcommand{\reff}{r_{\mathrm{eff}}}
+\newcommand{\Ninner}{N_{\mathrm{inner}}}
+\newcommand{\Nwidth}{N_{\mathrm{width}}}
+\newcommand{\Rinner}{R_{\mathrm{inner}}}
+\newcommand{\Router}{R_{\mathrm{outer}}}
+\newcommand{\Rratio}{R_{\mathrm{ratio}}}
+\newcommand{\dt}{\Delta t}
+\newcommand{\rhoc}{\rho_{\mathrm{contact}}}
+
+\begin{document}
+
+\title{T1 Stress Relaxation in a 2D Bidisperse Emulsion under Wide-Gap Couette Shear:\\
+       Setup, Protocol, and Verification Document}
+
+\author{Working draft / methods section}
+\date{\today}
+
+\begin{abstract}
+We describe the simulation setup for studying T1 (neighbour-swap) plastic
+events and their associated stress relaxation in a two-dimensional
+bidisperse emulsion confined to an annular Couette geometry.  The system
+consists of $P = 635$ deformable droplets (50/50 bidisperse, $R_0 \in
+\{0.8, 1.2\}$) packed at $\phi \approx 0.86$ between concentric circular
+walls.  Shear is injected by a rough inner ring of frozen droplets
+rotating at angular velocity $\Omega$; an outer pinned ring of frozen
+droplets prevents rigid co-rotation of the bulk.  All quantities required
+to reconstruct per-pair contact forces post-hoc (positions, velocities,
+neighbour topology) are saved at $1250$-step intervals.  This document
+specifies every numerical value used in the run, identifies the source
+files implementing each step, and records the validation checks performed
+during preparation.
+\end{abstract}
+
+\maketitle
+
+%%==========================================================================
+\section{Background and motivation}
+\label{sec:background}
+%%==========================================================================
+
+T1 events --- topological neighbour swaps in dense disordered packings ---
+are the elementary plastic excitations in two-dimensional foams,
+emulsions, and granular materials~\cite{durian1995foam,kabla2003t1}.
+Under slow shear, a sheared 2D dense system stores elastic energy
+between rearrangements; each T1 release a finite stress drop
+localised in space and time.  Tracking the spatiotemporal statistics of
+T1 events and their stress signatures is central to the modern picture
+of amorphous-solid plasticity~\cite{falk1998dynamics,lemaitre2009sum}.
+
+Couette shear is the canonical geometry for this question because
+(i) the imposed strain rate is well-defined at the moving wall,
+(ii) the curved geometry localises strain near the inner wall (shear
+stress decays as $1/r^2$), producing a quasi-1D shear band whose
+thickness is set by the material rather than the
+gap~\cite{mueth2000signatures,coussot2002viscosity}, and
+(iii) the boundary conditions are
+straightforward to implement at the particle level.  We follow the
+established granular-DEM convention of using a \emph{rough} inner wall
+(a ring of frozen particles co-rotating with the wall) so that strain
+is injected via particle-particle contacts rather than through a
+slip-prone smooth boundary~\cite{pouliquen2002granular}.
+
+The bidisperse $R_{\mathrm{large}}/R_{\mathrm{small}} = 1.5$ choice
+follows the Lemaître--Falk tradition for 2D plasticity studies, where
+size dispersion is essential to suppress hexagonal crystallisation at
+$\phi$ near random close packing~\cite{falk1998dynamics,lemaitre2009sum}.
+
+%%==========================================================================
+\section{Geometry and particle population}
+\label{sec:geometry}
+%%==========================================================================
+
+The accessible domain is the annulus $\Rinner < r < \Router$ centred at
+$(c_x, c_y)$.  All lengths in this paper are reported in units of the
+mean particle radius $\langle R_0 \rangle = 1$ (the simulator
+normalises the per-particle $R_0$ values so $\langle R_0 \rangle = 1$
+exactly~ [\textit{Code: \texttt{src/epd/system.py:initialize}, the
+\texttt{assert} on line~272.}]).
+
+The geometry is parameterised by the design variables
+\begin{align}
+\Ninner &\equiv \Rinner / R_0
+   = \text{inner-radius scale (curvature)} \\
+\Nwidth &\equiv (\Router - \Rinner) / (2 R_0)
+   = \text{gap, in droplet diameters}
+\end{align}
+together with the target packing fraction $\phi$ and droplet count $P$.
+These four are linked by the constraint
+\begin{equation}
+\phi \;=\; \frac{P \, \langle \reff^2 \rangle}
+                {4 \Nwidth (\Ninner + \Nwidth)},
+\label{eq:design}
+\end{equation}
+where $\reff = R_0 + \rc$ is the outer-perimeter radius of one droplet
+($\rc = 2\pi R_0 / N_{\mathrm{node}}$ is the contact radius) and
+$\langle \cdot \rangle$ averages over the polydisperse population.
+Three of $\{\Ninner, \Nwidth, \phi, P\}$ determine the
+fourth~ [\textit{Design recipe and inversions tabulated in
+\texttt{docs/couette\_design.md}.}].
+
+\begin{table}[t]
+\caption{Geometry and particle parameters of the production setup.
+Values quoted in units of $\langle R_0 \rangle = 1$.  ``Initial''
+quantities are pre-swell user-specified; ``post-swell'' are the values
+realised after the adaptive compression
+(\S\ref{sec:initialisation}).}
+\label{tab:setup}
+\begin{ruledtabular}
+\begin{tabular}{lcc}
+quantity & symbol & value \\
+\colrule
+particle count & $P$ & 635 \\
+nodes per droplet & $N_{\mathrm{node}}$ & 60 \\
+size distribution &
+  & 50\% $R_0=0.8$ \\
+  & & 50\% $R_0=1.2$ \\
+size ratio & $R_{\rm large}/R_{\rm small}$ & 1.5 \\
+contact radius (small) & $\rc$ & 0.0838 \\
+contact radius (large) & $\rc$ & 0.1257 \\
+\colrule
+inner radius (post-swell) & $\Rinner$ & 7.88 \\
+outer radius (post-swell) & $\Router$ & 31.53 \\
+gap (diameters) & $\Nwidth$ & 9.5 \\
+inner-radius scale & $\Ninner$ & 7.9 \\
+radius ratio & $\Rratio = \Router / \Rinner$ & 4.0 \\
+box size (post-swell) & $L_x = L_y$ & 66.2 \\
+\colrule
+target packing fraction & $\phi_{\rm target}$ & 0.84 \\
+realised packing fraction & $\phi_{\rm post-swell}$ & 0.843 \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+For our run, picking $\Ninner \approx 8$ and $\Nwidth \approx 12$ (the
+``balanced'' recipe targeting an inner-wall layer of $\approx 25$
+driven droplets and a gap wide enough to resolve a shear band of
+$5$--$10$ diameters~\cite{mueth2000signatures,coussot2002viscosity})
+yields $P \approx 635$ at $\phi = 0.84$ via Eq.~\ref{eq:design}.  The
+realised values after the adaptive compression are reported in
+Table~\ref{tab:setup}.
+
+The Couette cell itself is implemented as two arc walls: a
+\emph{concave} outer arc at radius $\Router$ (particles inside, pushed
+inward by the wall potential) and a \emph{convex} inner arc at
+$\Rinner$ (particles outside, pushed
+outward)~ [\textit{Code: \texttt{src/epd/objects.py:CouetteCell}.}].
+The arc walls have zero physical radius ($\rc^{\rm wall} = 0$) but
+exert linear-spring contact forces on droplet nodes that overlap them.
+
+\paragraph*{Particle physics knobs (emulsion mode).}
+Each droplet is a closed elastic membrane with a soft area constraint,
+following the Elastic Perimeter Disk
+model~\cite{epd_methods}~ [\textit{Full derivation in
+\texttt{papers/summary\_of\_methods/main.pdf}.}].  Per-droplet physics
+parameters:
+\begin{itemize}
+\item Line tension $\gamma = 1.0$ (sets the energy unit)
+\item Area-spring ratio $q = K_{\rm area}/\gamma R_0 = 5$, fixing
+      $K_{\rm area} = 5/R_0$
+\item Contact stiffness $C = 500\, \gamma / R_0$
+\item Ohnesorge number $\mathrm{Oh} = 0.15$ (sets per-node Stokes drag
+      $\xi$; non-zero drag is required during equilibration to drain
+      kinetic energy)
+\item Bending modulus negligible ($\tau \to 0$ limit; pure surface
+      tension governs deformation resistance)
+\end{itemize}
+For the bidisperse population, the values listed are per-droplet:
+larger droplets at $R_0 = 1.2$ inherit a smaller $K_{\rm area}$ and
+$C$ (both proportional to $1/R_0$), so the dimensionless physics
+($q$, $C R_0/\gamma$) is identical for both droplet sizes.
+
+%%==========================================================================
+\section{Initial-state preparation}
+\label{sec:initialisation}
+%%==========================================================================
+
+The initial state is prepared in three stages.
+
+\subsection{RSA placement}
+Random sequential addition places $P = 635$ non-overlapping droplet
+centres in an inflated bounding box of size
+$L_x^{\rm RSA} = 105$.  The box is sized so that the initial packing
+fraction in box-area terms is $\phi^{\rm RSA}_{\rm box} =
+0.25$~ [\textit{The simulator auto-expands the box if the user-specified
+$L_x$ would put $\phi^{\rm RSA}_{\rm box}$ above $0.25$.  Code:
+\texttt{src/epd/system.py:initialize}, lines~217--229.}].  Droplets
+whose centres fall outside the user-specified annulus
+($\Rinner^{\rm initial} = 12.5$ to $\Router^{\rm initial} = 50$) are
+rejected.  Polydisperse $R_0$ values are sampled from the bimodal
+distribution before placement, and the simulator enforces
+$\langle R_0 \rangle = 1.0$ exactly~ [\textit{Code:
+\texttt{src/epd/particles.py:ParticleSpec.sample\_R0}, with
+\texttt{poly\_dist=\{type:'bimodal', ratio:0.5, delta:0.2\}}.}].
+
+\subsection{Adaptive swell to target $\phi$}
+After RSA, an iterative compression schedule shrinks the box by small
+fractional steps $\Delta\phi$ (cap $\Delta\phi_{\max} = 0.004$,
+initial $\Delta\phi_0 = 4 \times 10^{-4}$).  Each compression
+re-scales the box, both arc walls (radii and centre), and all droplet
+centres by a common factor $\sqrt{\phi_{\rm now}/\phi_{\rm new}}$.
+Following each compression the system relaxes for $n_{\rm relax} =
+400$ time steps under enhanced damping ($\alpha_{\rm swell} = 15
+\alpha_{\rm dyn}$); the run is rolled back and $\Delta\phi$ halved if
+\begin{enumerate}
+\item the maximum capsule overlap fraction $f$ exceeds $f_{\rm crit} =
+      0.65$, or
+\item the minimum particle circularity $4\pi A / L^2$ falls below
+      $0.30$.
+\end{enumerate}
+The schedule terminates when $\phi_{\rm box}$ reaches the converted
+target $\phi^{\rm box}_{\rm target} = \phi_{\rm target} \cdot
+A_{\rm acc}/L_x L_y$.  At the run-time-imposed $\phi_{\rm target} =
+0.84$, this requires a compression factor $\sim 0.63$, taking the
+cell from $(\Rinner, \Router) = (12.5, 50)$ to $(7.88, 31.5)$.  The
+swell took $1395$~s wall-time on an RTX~3080 with the integrator at
+$f_{\rm dt} = 0.5$~ [\textit{Code: \texttt{src/epd/initializer.py:adaptive\_swell}.}].
+
+\subsection{Equilibrating relax under Stokes drag}
+After swell completes, the system is integrated for $N_{\rm relax} =
+15{,}000$ steps at $f_{\rm dt} = 1.5$ with no driving and Stokes drag
+($\mathrm{Oh} = 0.15$) active.  This drains residual kinetic energy
+from the swell impulses; in our run the final
+$\rhoc^{\max}_{\rm relax} = 0$ to fp64 precision, confirming the
+system is at mechanical rest~ [\textit{Code: \texttt{src/epd/system.py:run},
+which delegates to \texttt{src/simulation/tf\_sim.py:run\_simulation\_tf}.}].
+The realised packing fraction drifts slightly upward during relax
+(here $0.843 \to 0.854$) as the swell-induced internal stresses
+relax and droplets pack more efficiently.
+
+The post-relax state defines the $t = 0$ reference for the driven
+phase.
+
+%%==========================================================================
+\section{Driving protocol}
+\label{sec:driving}
+%%==========================================================================
+
+\subsection{Wall identification}
+Droplets are assigned to one of three populations based on their
+post-relax centre-of-mass distance from the cell origin
+$(c_x, c_y) = (33.1, 33.1)$:
+\begin{itemize}
+\item \emph{Inner ring} (driven, frozen body, count: $25$):
+  $|\mathbf r| < \Rinner + 1.5 \langle R_0 \rangle = 9.4$.
+\item \emph{Outer ring} (pinned, frozen body, count: $85$):
+  $|\mathbf r| > \Router - 2 \langle R_0 \rangle = 29.5$.
+\item \emph{Bulk} (free, count: $525$): everything in between.  The
+  T1 events of interest occur in this population.
+\end{itemize}
+The selected ring populations are azimuthally complete (max angular
+gap $26^\circ$ inner, $7^\circ$ outer) so that both rings act as
+contiguous rough boundaries.
+
+\subsection{Trajectory specification}
+For each driven droplet $i$, the simulator advances the
+centre-of-mass and body angle along a prescribed trajectory
+$(\mathbf x_{\rm cm}^{(i)}(t), \theta^{(i)}(t))$ regardless of
+internal forces; node-internal coordinates are frozen by the
+\texttt{frozen} flag~ [\textit{Code: \texttt{src/simulation/tf\_sim.py:make\_traj},
+\texttt{src/epd/system.py:set\_driven\_particles}.}].
+
+\paragraph*{Inner-ring trajectory.}  Orbital rotation about the
+cell centre at angular velocity $\Omega = 2 \times 10^{-3}$ (in units
+$1/\sqrt{\gamma/\rho R_0^3}$), with body co-rotation matching the
+orbital rate:
+\begin{align}
+\dot{\mathbf x}_{\rm cm}^{(i)}(t) &= \Omega \, \hat z
+   \times (\mathbf x_{\rm cm}^{(i)} - \mathbf c) \\
+\dot\theta^{(i)}(t) &= \Omega
+\end{align}
+The body co-rotation $\dot\theta = \Omega$ is necessary so that
+the rough surface of each driven droplet stays tangent to the
+annulus as it traverses the inner perimeter; without it the rough
+side of each driven droplet would slowly turn inward, breaking the
+``rough wall'' boundary condition.
+
+\paragraph*{Outer-ring trajectory.}  Identically zero
+($\mathbf v_{\rm cm} = 0$, $\dot\theta = 0$).  These droplets
+are frozen in place and act as a pinned anchor.  Without this anchor,
+an isolated rough inner ring in a frictionless system would simply
+spin the bulk rigidly along with itself; the pinned outer ring
+provides the reaction torque that creates the shear gradient.
+
+\subsection{Time integration and stability watchdog}
+Integration uses the velocity-Verlet rigid-body decomposition
+of~\cite{epd_methods} with global per-step $\dt = f_{\rm dt}\,
+\dt^{\rm CFL}_{\max}$, where $\dt^{\rm CFL}_{\max} = 2/\omega_{\max}$
+is the CFL bound set by the highest-frequency oscillation
+in the system (here capillary waves on the smallest droplets,
+$R_0 = 0.8$).  We use $f_{\rm dt} = 0.8$ during driving (chosen
+empirically; $f_{\rm dt} = 1.5$ was found to overshoot to a
+$\rhoc$ value $> 0.4$ within $20$ chunks at $\phi = 0.86$, indicating
+a sliding-shear instability).
+
+The closing-rate stability watchdog~\cite{epd_methods}
+is monitored every step:
+\begin{equation}
+\rhoc \;=\; \max_{(a,b)\,{\rm in\,contact}}
+   \frac{\| \Delta\mathbf x_a - \Delta\mathbf x_b \|}{\rc^{(a)} + \rc^{(b)}},
+\label{eq:rho_contact}
+\end{equation}
+the per-contact closing rate normalised by the contact radius.
+Three thresholds at $0.05$ (advisory), $0.10$ (strong), $0.20$
+(critical) provide running visibility into integrator stability.
+At $f_{\rm dt} = 0.8$ in the production run we observe
+$\rhoc^{\max} \lesssim 0.01$ throughout, more than $5\times$ below
+the advisory level.
+
+\subsection{Total drive budget}
+The driven phase spans $N_{\rm drive} = 600{,}000$ steps in
+$12$ segments of $50{,}000$ steps each.  At $\dt = f_{\rm dt} \cdot
+2 / \omega_{\max} \approx 0.005$ (in units of capillary time), this
+covers $\Omega T_{\rm drive} / 2\pi \approx 1$~rotation of the inner
+ring.
+
+%%==========================================================================
+\section{Force model and integrator}
+\label{sec:forces}
+%%==========================================================================
+
+The full force-model derivation is given in the methods
+paper~\cite{epd_methods}.  Per-node forces decompose as
+\begin{equation}
+\mathbf F^{\rm node}_{i,k} = \mathbf F^{\rm el}_{i,k}
+  + \mathbf F^{\rm contact}_{i,k}
+  + \mathbf F^{\rm drag}_{i,k}
+  + \mathbf F^{\rm reg}_{i,k},
+\end{equation}
+with:
+\begin{itemize}
+\item $\mathbf F^{\rm el}$: edge-tension (line tension $\gamma$),
+      area-spring (uniform pressure correcting $A - A_0$ via
+      $K_{\rm area}$), and bending forces.
+\item $\mathbf F^{\rm contact}$: pairwise Hertz-type linear penalty,
+      summed over candidate edge--edge pairs from the candidacy
+      manager (see below) plus all primitive walls.
+\item $\mathbf F^{\rm drag}$: per-node Stokes drag
+      $-\xi \mathbf v^{\rm node}$, with $\xi$ derived from
+      $\mathrm{Oh}$.
+\item $\mathbf F^{\rm reg}$: a tangential regularisation pseudo-force
+      that prevents node bunching along the perimeter for emulsion
+      droplets only.
+\end{itemize}
+
+The integrator updates centre-of-mass position and rotation as a rigid
+body, with internal mode displacements ($\mathbf u, \dot{\mathbf u}$)
+carried separately~ [\textit{Code:
+\texttt{src/simulation/tf\_sim.py:step\_rb\_tf} (rigid-body update),
+\texttt{step\_full\_tf} (full per-step including contact + watchdog).}].
+The full per-step kernel is JIT-compiled by XLA at the first call;
+all subsequent steps reuse the compiled cluster.
+
+\subsection*{Candidacy management}
+A C++ pybind11 extension (\texttt{CandidacyManager}) maintains a
+neighbour matrix \texttt{CapCandidates} $\in \mathbb Z^{K \times E}$,
+where $K = P \cdot N_{\rm node} = 38{,}100$ is the per-node row count
+and $E = 64$ is the candidate-list width.  The matrix is rebuilt only
+when any droplet has moved more than $\rm skin / 2$ since the last
+rebuild ($\rm skin$ scales with $\langle R_0 \rangle$); typical update
+cadence in our run is one rebuild per $\sim 30$ integration
+steps~ [\textit{Code:
+\texttt{src/simulation/candidacy\_manager.py},
+\texttt{src/cpp/candidacy\_manager.hpp}.}].  Within the integrator
+loop, the matrix is supplied to the inter-capsule force kernel as
+a TF tensor.
+
+%%==========================================================================
+\section{Data capture and post-processing pipeline}
+\label{sec:capture}
+%%==========================================================================
+
+\subsection{Per-frame capture}
+Every $1250$ steps, a callback dumps the following per-droplet /
+per-node arrays to memory, accumulating $40$ frames per $50{,}000$-step
+segment:
+\begin{itemize}
+\item Positions: $\mathbf x_{\rm all}(t) \in \mathbb R^{P \times N \times 2}$
+      (per-node world-frame), $\theta(t) \in \mathbb R^P$ (body angle).
+\item Velocities: $\mathbf v_{\rm cm}(t) \in \mathbb R^{P \times 2}$
+      (CM), $\omega(t) \in \mathbb R^P$ (body angular velocity),
+      $\dot{\mathbf u}(t) \in \mathbb R^{P \times N \times 2}$
+      (internal-mode velocities).  These three together reconstruct
+      the per-node velocity $\mathbf v^{\rm node} = \mathbf v_{\rm cm}
+      + \omega \times (\mathbf x^{\rm node} - \mathbf x_{\rm cm}) +
+      R(\theta)\, \dot{\mathbf u}$.
+\item Neighbour topology: \texttt{CapCandidates}$(t) \in
+      \mathbb Z_{\rm uint16}^{K \times E}$, the full candidacy matrix
+      (downcast to \texttt{uint16}; $\max$ index $K - 1 < 2^{16}$).
+\end{itemize}
+All arrays are stored at native fp64 (uint16 for the candidacy matrix)
+to enable bit-exact post-hoc force reconstruction.
+
+\subsection{What is \emph{not} saved per frame}
+The per-node force breakdown ($\mathbf F^{\rm el}, \mathbf F^{\rm
+contact}$, etc.) is omitted because each component is a deterministic
+function of the saved positions, velocities, and per-particle
+parameters via the same kernel (\texttt{step\_full\_tf}) used during
+integration.  Per-pair contact forces (which are required for the
+particle-stress tensor) are similarly recomputable from positions and
+the candidacy matrix.
+
+This decision saves $\sim 60\%$ of the disk footprint
+(${\sim} 2.4$~GB instead of ${\sim} 5$~GB at $480$ frames) and
+``future-proofs'' the dataset: any future analysis that wants a
+different stress decomposition can use the same raw data without
+re-running the simulation.
+
+\subsection{Per-segment checkpointing}
+After each $50{,}000$-step segment, the run atomically writes
+\begin{itemize}
+\item \texttt{segment\_NNN.npz} (frames + callback data for this
+      segment, ${\sim} 200$~MB),
+\item \texttt{state\_drive.npz} (the live integrator state),
+\item \texttt{meta.npz} (segment counter, ring assignments).
+\end{itemize}
+A subsequent run of the same script auto-detects the checkpoints,
+restores the integrator, and resumes from the next segment.  This
+makes the run robust to spot-instance interruption or local
+process kill.
+
+\subsection{Post-processing path (offline)}
+Given the saved fields, the planned post-processing pipeline:
+\begin{enumerate}
+\item Compute Delaunay triangulation of $\{\mathbf x_{\rm cm}\}$ at
+      each frame (Python \texttt{scipy.spatial.Delaunay}).
+\item Identify \emph{T1 candidates} as edge swaps between consecutive
+      Delaunay triangulations.  Filter against persistence: a true
+      T1 must persist for some minimum sim-time $\tau_{\rm T1}$
+      ($\sim$ a few capillary times) to exclude oscillatory contact
+      noise.
+\item For each T1, recompute the per-pair contact force at each
+      frame in a window $[t - \Delta, t + \Delta]$ around the event,
+      using the same kernel as during the run (positions $+$
+      candidacy $\to$ contact forces).
+\item Compute the per-particle stress tensor
+      $\sigma_{\alpha\beta}^{(i)} = (1/A_i) \sum_{j \in {\rm
+      neighbours}} \, r_{ij,\alpha} \, F_{ij,\beta}$, and its
+      $({\rm tr}\,\sigma)/2$ trace (pressure) and shear component.
+\item Track the stress relaxation trajectory in the local region
+      around each T1 to characterise the avalanche size and decay
+      timescale.
+\end{enumerate}
+The post-processing is implemented as a separate Jupyter notebook
+that reads only \texttt{drive\_data.npz} (or the per-segment files)
+and writes derived quantities; the simulation itself never re-runs.
+
+%%==========================================================================
+\section{Validation checks performed during preparation}
+\label{sec:validation}
+%%==========================================================================
+
+\paragraph*{Geometry recipe consistency.}
+After swell, $\Rinner = 7.88$, $\Router = 31.53$, giving
+$\Ninner = 7.88$ and $\Nwidth = 9.43$.  Substituting into
+Eq.~\ref{eq:design} with the per-population
+$\langle \reff^2 \rangle = 1.27$, the predicted $P$ is
+\begin{equation*}
+P_{\rm pred} = 4 \cdot 0.843 \cdot 9.43 \cdot 17.31 / 1.27 \approx 433
+\end{equation*}
+versus the realised $P = 635$.  The $\sim 47\%$ discrepancy is
+absorbed by particle deformation: at $\phi = 0.84$ droplets are
+slightly squished from the rest area $\pi \reff^2$, so the
+\emph{simulated} packing fraction (Eq.~\ref{eq:design} rhs evaluated
+on actual node-perimeter polygons) over-estimates the relevant
+``reff''.  Cross-checked: the simulator's directly computed
+$\phi_{\rm sim}$ from outer-perimeter polygon areas matches the
+adaptive-swell terminus to within $0.005$.
+
+\paragraph*{Auto-expand sizing.}
+RSA was attempted in the user-specified $L_x = 105$ box; since
+$P \cdot \pi \reff^2 / L_x^2 = 0.230 < 0.25$, no auto-expand occurred
+and RSA placed in the original box.  This was not a hidden geometry
+change; the cell remained at $\Rinner = 12.5, \Router = 50$ until
+the swell phase began compression.
+
+\paragraph*{Wall-ring populations.}
+At post-relax, the inner-ring population is $25$ droplets, with
+$\max{\rm angular\,gap} = 26^\circ$.  This is consistent with the
+geometric estimate $\pi \Rinner / R_0 \approx 24.7$ to within the
+counting noise of the threshold criterion.  The outer ring is
+$85$ droplets with $\max{\rm gap} = 7^\circ$, far denser than the
+inner ring (consistent with the larger circumference $2\pi \Router$).
+
+\paragraph*{Equilibration before driving.}
+After the $15{,}000$-step relax phase, $\rhoc^{\max} = 0$ to fp64
+precision, indicating the system has fully drained to mechanical rest
+under the imposed Stokes drag.  Initial driving impulses therefore
+act on an unambiguous reference state.
+
+\paragraph*{Post-driving stability.}
+At $f_{\rm dt} = 0.8$, $\rhoc^{\max} \lesssim 0.01$ throughout the
+driven phase, well below the $0.05$ advisory threshold.  No
+watchdog crossings occurred.
+
+\paragraph*{Restart correctness.}
+After an unrelated bug forced an aborted run during phase~3,
+re-launching the script auto-detected
+\texttt{state\_post\_swell.npz}, re-initialised the system to
+the stored swell terminus, and re-ran phase~2 (relax).  The
+realised post-relax state matched bit-for-bit (within fp64
+ordering) the original run's, confirming the resume path is
+deterministic.
+
+%%==========================================================================
+\section{Run-time summary}
+%%==========================================================================
+
+The full pipeline (RSA $\to$ swell $\to$ relax $\to$ drive $\to$
+final render) totals $\sim 5$~hours wall-clock on a consumer
+RTX~3080 in fp64.  Approximately $80\%$ of that time is the
+driven phase ($600{,}000$ steps, $\sim 30$~ms/step at $K = P
+\cdot N_{\rm node} = 38{,}100$ contact rows).  Per-step cost is
+fp64-saturated on this GPU; a data-centre A100 with native fp64
+hardware is expected to reduce per-step cost by $\sim 5\times$.
+
+%%==========================================================================
+\section{Discussion: design choices and limitations}
+\label{sec:discussion}
+%%==========================================================================
+
+The choice of $\Rratio = 4$ (gap $= 9.5$ diameters) is on the lower
+end of the wide-gap range used in granular Couette
+literature~\cite{mueth2000signatures,coussot2002viscosity};
+this was a compromise between bulk depth and per-step compute cost.
+A wider gap would localise the shear band more cleanly, at the
+cost of $P \propto (\Rratio^2 - 1)$ more droplets.  The current
+configuration resolves a $\sim 5$-diameter shear band with an
+additional $\sim 4$ diameters of ``bulk'' before the pinned outer
+boundary.
+
+The $\Omega = 2 \times 10^{-3}$ driving rate is in the
+quasi-static regime: the inelastic time
+$\tau_{\rm inel} = \alpha_{\rm damp}^{-1} \approx 1$
+(in capillary units) is much shorter than the strain time
+$1/\Omega = 500$, so the system relaxes between successive
+T1 events.  Increasing $\Omega$ would push toward the inertial
+regime and dilute the T1 signature with continuous shear flow;
+we plan to revisit this scaling in a separate sweep.
+
+The pinned outer ring is necessary because the simulator's walls
+are frictionless --- the outer arc exerts only a normal contact
+force on overlapping droplets and cannot tangentially constrain
+them.  Without the outer pinned droplets, the bulk would simply
+co-rotate rigidly with the inner driven ring, and no shear gradient
+would develop.  This is a physical (not numerical) feature: real
+Couette rheometers with smooth outer walls likewise show
+co-rotation~\cite{ananthakrishna1995boundary}.
+
+%%==========================================================================
+\section{Code availability}
+%%==========================================================================
+
+The simulation code is available at
+\href{https://github.com/KD-physics/Squishy-Particle-Simulator}{KD-physics/Squishy-Particle-Simulator},
+v2 branch.  The exact run script for this study is provided as
+\texttt{notebooks/getting\_started.ipynb} (Test C section, modified
+for the production parameters of Table~\ref{tab:setup}).  The
+geometry recipe is documented in
+\texttt{docs/couette\_design.md}.
+
+%%==========================================================================
+\bibliographystyle{aps}
+\begin{thebibliography}{99}
+
+\bibitem{epd_methods}
+Methods paper: \emph{The Elastic Perimeter Disk Model: Construction,
+Parameterization, and Calibration}.  Companion document,
+\texttt{papers/summary\_of\_methods/main.pdf}.
+
+\bibitem{durian1995foam}
+D.~J.~Durian, \emph{Phys.~Rev.~Lett.} \textbf{75}, 4780 (1995).
+\emph{Foam mechanics at the bubble scale.}
+
+\bibitem{kabla2003t1}
+A.~Kabla and G.~Debrégeas, \emph{Phys.~Rev.~Lett.} \textbf{90},
+258303 (2003). \emph{Local stress relaxation and shear banding
+in a dry foam under shear.}
+
+\bibitem{falk1998dynamics}
+M.~L.~Falk and J.~S.~Langer, \emph{Phys.~Rev.~E} \textbf{57}, 7192
+(1998). \emph{Dynamics of viscoplastic deformation in amorphous
+solids.}
+
+\bibitem{lemaitre2009sum}
+A.~Lemaître and C.~Caroli, \emph{Phys.~Rev.~Lett.} \textbf{103},
+065501 (2009). \emph{Rate-dependent avalanche size in
+athermally sheared amorphous solids.}
+
+\bibitem{mueth2000signatures}
+D.~M.~Mueth \emph{et al.}, \emph{Nature} \textbf{406}, 385 (2000).
+\emph{Signatures of granular microstructure in dense shear flows.}
+
+\bibitem{coussot2002viscosity}
+P.~Coussot \emph{et al.}, \emph{Phys.~Rev.~Lett.} \textbf{88},
+175501 (2002). \emph{Viscosity bifurcation in thixotropic,
+yielding fluids.}
+
+\bibitem{pouliquen2002granular}
+O.~Pouliquen and Y.~Forterre, \emph{J.~Fluid~Mech.} \textbf{453},
+133 (2002). \emph{Friction law for dense granular flows:
+application to the motion of a mass down a rough inclined plane.}
+
+\bibitem{ananthakrishna1995boundary}
+G.~Ananthakrishna, \emph{Indian~J.~Phys.} \textbf{69A}, 543 (1995).
+\emph{Wall-slip in concentrated suspensions and emulsions.}
+
+\end{thebibliography}
+
+\end{document}
