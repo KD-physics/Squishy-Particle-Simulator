@@ -200,10 +200,21 @@ class System:
     # ── initialization ────────────────────────────────────────────────────────
 
     def initialize(self, phi_target=0.80, seed=42, verbose=True,
-                   relax_only=False, n_relax_init=200, **swell_kwargs):
+                   relax_only=False, n_relax_init=200,
+                   cand_check_interval=10, **swell_kwargs):
         """
         RSA seed + adaptive swell to phi_target.
         Sets state['t']=0 and state['step']=0 after completion.
+
+        cand_check_interval : int — Python candidacy callback every N steps
+                              during initial relax / adaptive_swell. Default 10.
+                              Larger values reduce CPU↔GPU sync count (helpful
+                              on virtualized PCIe like Colab) at the cost of
+                              looser candidacy freshness within each block.
+
+        Inherits self.use_tf_function for the inner relax loops in both
+        branches (relax_only and adaptive_swell).
+
         Returns self.
         """
         import tensorflow as tf
@@ -373,9 +384,10 @@ class System:
                     skin=skin_abs,
                     prim_data=prim_data,
                     R0_max=R0_max_val,
-                    cand_check_interval=1,
+                    cand_check_interval=cand_check_interval,
                     diagnostics=False,
                     step_offset=0,
+                    use_tf_function=self._use_tf_function,
                 )
                 state = {
                     **new_phys,
@@ -390,12 +402,17 @@ class System:
             acc_area = self._accessible_area()
             box_area = self.Lx * self.Ly
             phi_target_swell = phi_target * (acc_area / box_area)
+            skin_abs   = self._skin * float(np.mean(R0_arr_all))
+            R0_max_val = float(np.max(R0_arr_all))
             state, Lx_new, Ly_new = adaptive_swell(
                 state, params, cm_mgr, prim_data,
                 phi_target=phi_target_swell,
                 Lx=self.Lx, Ly=self.Ly,
                 verbose=verbose,
                 objects=self._objects,
+                skin=skin_abs, R0_max=R0_max_val,
+                cand_check_interval=cand_check_interval,
+                use_tf_function=self._use_tf_function,
                 **swell_kwargs,
             )
             self.Lx = Lx_new

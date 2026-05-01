@@ -361,7 +361,10 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
                    V_CRIT_FRAC=50.0, max_restores=6,
                    swell_alpha=10.0,
                    objects=None,
-                   verbose=True):
+                   verbose=True,
+                   skin=None, R0_max=None,
+                   cand_check_interval=10,
+                   use_tf_function=False):
     """
     Adaptively swell a particle packing from its current state to phi_target.
 
@@ -380,7 +383,8 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
     state, Lx, Ly  (updated)
     """
     import tensorflow as tf
-    from src.simulation.tf_sim import step_full_tf, set_periodic_box, DTYPE, NP_DTYPE
+    from src.simulation.tf_sim import (step_full_tf, run_simulation_tf,
+                                        set_periodic_box, DTYPE, NP_DTYPE)
 
     # Extract per-particle arrays from params
     r_c_arr = params['r_c_per_p'].numpy() if hasattr(params['r_c_per_p'], 'numpy') \
@@ -391,17 +395,69 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
     # dt, alpha, g scalars — use swell_alpha (higher damping kills ringing faster)
     from src.simulation.capsule_shell import CapsuleParticle
     dt_tf    = params.get('_dt_tf', tf.constant(NP_DTYPE(0.01)))
+    dt_val   = float(dt_tf.numpy())
     alpha_tf = tf.constant(NP_DTYPE(swell_alpha))
     g_tf     = tf.constant(NP_DTYPE(0.0))
 
     # Velocity scale for v_crit
-    v_scale  = float(np.mean(r_c_arr)) / float(dt_tf.numpy())
+    v_scale  = float(np.mean(r_c_arr)) / dt_val
     v_crit   = V_CRIT_FRAC * v_scale
 
-    # Mutable prim_data container so object rescaling is seen by _step
+    # Skin / R0_max for run_simulation_tf's candidacy threshold check.
+    # If caller didn't pass them, fall back to safe defaults from cm_mgr
+    # (mean-based; for polydisperse the worst case is just a slightly looser
+    # check, so candidacy may refresh more often than strictly necessary).
+    if skin is None:
+        skin = float(getattr(cm_mgr, 'skin', np.mean(r_c_arr)))
+    if R0_max is None:
+        R0_max = float(getattr(cm_mgr, 'R0', 1.0))
+
+    # Mutable prim_data container so object rescaling is seen by _relax_block
     _pd = [prim_data]
 
+    def _relax_block(st, n_steps):
+        """Run n_steps of relax via run_simulation_tf (one wrapped tf.while_loop
+        per call, optionally graph-compiled). Returns the wrapped state.
+
+        For the swell, alpha is forced to swell_alpha by overriding the TF
+        scalar inside `params` for the duration of the call, then restored.
+        Same trick for g (swell uses g=0). dt is unchanged.
+        """
+        if n_steps <= 0:
+            return st
+        phys = {k: v for k, v in st.items() if k not in ('t', 'step')}
+        # Inject swell-specific damping/g into params, remember originals
+        _alpha_save = params.get('_alpha_tf')
+        _g_save     = params.get('_g_tf')
+        params['_alpha_tf'] = alpha_tf
+        params['_g_tf']     = g_tf
+        try:
+            new_phys = run_simulation_tf(
+                phys, dt_val, swell_alpha, 0.0,
+                params, n_steps, cm_mgr,
+                skin=skin, prim_data=_pd[0], R0_max=R0_max,
+                cand_check_interval=cand_check_interval,
+                diagnostics=False,
+                step_offset=0,
+                use_tf_function=use_tf_function,
+            )
+        finally:
+            if _alpha_save is not None:
+                params['_alpha_tf'] = _alpha_save
+            if _g_save is not None:
+                params['_g_tf'] = _g_save
+        # Re-attach t/step if the original state had them (they're not stepped
+        # by run_simulation_tf — adaptive_swell resets t at the end anyway).
+        if 't' in st:
+            new_phys['t'] = st['t']
+        if 'step' in st:
+            new_phys['step'] = st['step']
+        return _wrap(new_phys, Lx, Ly)
+
     def _step(st):
+        """Single-step variant retained for callers that need fine-grained
+        Python control between steps (currently unused after the relax-loop
+        rewrite, but kept for back-compat / future use)."""
         if cm_mgr.needs_update(st['x_cm'].numpy(), st['theta'].numpy()):
             cm_mgr.update(st['x_cm'].numpy(), st['theta'].numpy())
         caps    = tf.constant(cm_mgr.CapCandidates, dtype=tf.int32)
@@ -439,10 +495,10 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
     # Initial relax
     n_init = min(n_relax, 3000)
     if verbose:
-        print(f"  Initial relax: {n_init} steps ...")
-    for _ in range(n_init):
-        state = _step(state)
-        state = _wrap(state, Lx, Ly)
+        print(f"  Initial relax: {n_init} steps "
+              f"(cand_check_interval={cand_check_interval}, "
+              f"use_tf_function={use_tf_function}) ...")
+    state = _relax_block(state, n_init)
 
     # Update cm_mgr with current box
     cm_mgr.Lx = Lx; cm_mgr.Ly = Ly
@@ -490,9 +546,7 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         consecutive_restores = 0
 
         # Relax
-        for _ in range(n_relax):
-            state = _step(state)
-            state = _wrap(state, Lx, Ly)
+        state = _relax_block(state, n_relax)
         total_steps += n_relax
 
         # Post-relax metrics
@@ -515,18 +569,18 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
                 break
             continue
 
-        # Extra relax if still overlapping
+        # Extra relax if still overlapping — chunk into 200-step blocks
+        # so we can still poll metrics between chunks (same cadence as before)
         if f_post >= f_warn:
             extra = 0
             while f_post >= f_warn and extra < max_extra_relax:
-                state = _step(state)
-                state = _wrap(state, Lx, Ly)
-                extra += 1
-                if extra % 200 == 0:
-                    f_post    = _compute_max_f(state, cm_mgr, Lx, Ly, L0_arr)
-                    circ_post = _compute_min_circularity(state)
-                    if circ_post <= circ_crit:
-                        break   # shape collapsed during extra relax → exit and restore next iter
+                step_chunk = min(200, max_extra_relax - extra)
+                state = _relax_block(state, step_chunk)
+                extra += step_chunk
+                f_post    = _compute_max_f(state, cm_mgr, Lx, Ly, L0_arr)
+                circ_post = _compute_min_circularity(state)
+                if circ_post <= circ_crit:
+                    break   # shape collapsed during extra relax → exit and restore next iter
             total_steps += extra
             f_post    = _compute_max_f(state, cm_mgr, Lx, Ly, L0_arr)
             circ_post = _compute_min_circularity(state)
