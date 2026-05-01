@@ -343,7 +343,6 @@ class System:
         P      = len(particles)
         N_val  = particles[0].N
         R0_arr = np.array([p.R0 for p in particles])
-        r_c_arr = np.array([p.r_c for p in particles])
         cm_mgr = CandidacyManager(
             P=P, N=N_val,
             R0=float(np.mean(R0_arr)),
@@ -354,7 +353,6 @@ class System:
             periodic_y=self._config['periodic_y'],
             Lx=self.Lx, Ly=self.Ly,
             R0_arr=R0_arr,
-            r_c_per_p_arr=r_c_arr,
         )
         cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
 
@@ -535,7 +533,6 @@ class System:
 
         # 4. CandidacyManager — identical parameters to TF test defaults
         R0_arr = np.array([p.R0 for p in particles])
-        r_c_arr = np.array([p.r_c for p in particles])
         N_val  = p0.N
         cm_mgr = CandidacyManager(
             P=P, N=N_val,
@@ -547,7 +544,6 @@ class System:
             periodic_y=self._config['periodic_y'],
             Lx=self.Lx, Ly=self.Ly,
             R0_arr=R0_arr,
-            r_c_per_p_arr=r_c_arr,
         )
         cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
 

@@ -39,7 +39,7 @@ class CandidacyManager:
     def __init__(self, P, N, R0, E=32, skin=0.3, dj=None,
                  periodic=False, periodic_x=None, periodic_y=None,
                  Lx=None, Ly=None, log_dir=None,
-                 R0_arr=None, skin_arr=None, r_c_per_p_arr=None):
+                 R0_arr=None, skin_arr=None):
         # dj default: covers ~45° half-arc per contact; non-overlapping for
         # typical multi-neighbor configurations (equilateral, hex packing).
         # Formula: dj = max(3, N//8) → window = 2*dj+1 edges ≈ N/4 arc.
@@ -83,23 +83,6 @@ class CandidacyManager:
         self.K              = K
         self.CapCandidates  = np.zeros((K, E), dtype=np.int32)
 
-        # Phase 6 Phase 1.1: derived candidacy outputs (computed at end of update())
-        # Refresh with each update so callers can read precomputed values instead
-        # of reproducing them inside the per-step TF graph.
-        self.cand_0safe = np.zeros((K, E), dtype=np.int32)
-        self.b1_global  = np.zeros((K, E), dtype=np.int32)
-        self.active     = np.zeros((K, E), dtype=np.float64)
-        self.r_c_cand   = np.zeros((K, E), dtype=np.float64)
-        self.contact_r  = np.zeros((K, E), dtype=np.float64)
-        self.r_c_sq     = np.zeros((K, E), dtype=np.float64)
-
-        # Per-particle contact radius — required for r_c_cand / contact_r / r_c_sq.
-        # When None, those three remain zero and TF must compute them itself.
-        self._r_c_per_p_arr = None
-        self._r_c_flat      = None  # (K,) — repeat(r_c_per_p, N)
-        if r_c_per_p_arr is not None:
-            self.set_r_c_per_p_arr(r_c_per_p_arr)
-
         # Update-trigger tracking
         self._last_x_cm  = None   # (P, 2) float64
         self._last_theta = None   # (P,)  float64
@@ -116,19 +99,6 @@ class CandidacyManager:
             os.makedirs(log_dir, exist_ok=True)
 
     # ── public interface ──────────────────────────────────────────────────────
-
-    def set_r_c_per_p_arr(self, r_c_per_p_arr):
-        """
-        Bind per-particle contact radius (P,) so that update() can populate
-        derived candidacy fields (r_c_cand, contact_r, r_c_sq).
-        Call once after construction (or whenever per-particle r_c changes,
-        e.g. after a swelling step).
-        """
-        arr = np.asarray(r_c_per_p_arr, dtype=np.float64)
-        if arr.shape != (self.P,):
-            raise ValueError(f"r_c_per_p_arr must be shape ({self.P},), got {arr.shape}")
-        self._r_c_per_p_arr = arr.copy()
-        self._r_c_flat      = np.repeat(arr, self.N)   # (K,)
 
     def needs_update(self, x_cm, theta):
         """
@@ -188,21 +158,6 @@ class CandidacyManager:
         if max_used >= self.E - 2:
             print(f"WARNING: CandidacyManager E={self.E} near capacity "
                   f"(max_used={max_used}). Increase E.")
-
-        # ── Phase 6 Phase 1.1: refresh derived candidacy outputs ─────────────
-        # These mirror the per-step expressions inside inter_capsule_forces_tf
-        # so the TF graph can consume them directly (Phase 1.2) instead of
-        # recomputing them every step.
-        N = self.N
-        self.cand_0safe[:] = np.maximum(self.CapCandidates, 1) - 1
-        p_b                = self.cand_0safe // N
-        e_b                = self.cand_0safe % N
-        self.b1_global[:]  = p_b * N + (e_b + 1) % N
-        self.active[:]     = (self.CapCandidates != 0).astype(np.float64)
-        if self._r_c_flat is not None:
-            self.r_c_cand[:]  = self._r_c_flat[self.cand_0safe]
-            self.contact_r[:] = self._r_c_flat[:, None] + self.r_c_cand
-            self.r_c_sq[:]    = self.contact_r * self.contact_r
 
     def step(self, x_cm, theta):
         """Alias for update() matching the C++ pybind11 interface."""
