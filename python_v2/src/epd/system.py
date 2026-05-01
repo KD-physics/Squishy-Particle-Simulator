@@ -48,7 +48,8 @@ class System:
                  # who know their problem; defaults are conservative.
                  disp_advisory=0.05,
                  disp_strong=0.10,
-                 disp_critical=0.20):
+                 disp_critical=0.20,
+                 use_tf_function=False):
         self.Lx = float(Lx)
         self.Ly = float(Ly)
         self._config = {
@@ -65,6 +66,11 @@ class System:
         self._disp_critical = float(disp_critical)
         self._disp_advisory_fired = False     # one-shot per run.clear_recording()
         self._max_disp_ratio_run  = 0.0       # running max for end-of-run summary
+        # Default dispatch mode for run/run_fast. When True, the inner
+        # tf.while_loop runs as a single graph (one ~5–10s trace per call site,
+        # then no per-iteration Python/runtime tick). Set once here or via the
+        # `use_tf_function` property; per-call kwarg overrides this default.
+        self._use_tf_function = bool(use_tf_function)
 
         # Populated by add_particles / add_object
         self._specs    = []    # list[ParticleSpec]
@@ -124,6 +130,18 @@ class System:
         if self._dt_max is not None and self._dt_max > 0:
             self._dt = v * self._dt_max
         self._sync_dt_tensors()
+
+    @property
+    def use_tf_function(self):
+        """Default dispatch mode for run/run_fast. When True, the inner
+        tf.while_loop is wrapped in tf.function and executes as a single
+        graph (eliminates per-iteration eager-dispatch overhead). Per-call
+        kwarg on run/run_fast overrides this default when explicitly set."""
+        return self._use_tf_function
+
+    @use_tf_function.setter
+    def use_tf_function(self, value):
+        self._use_tf_function = bool(value)
 
     def _sync_dt_tensors(self):
         """Propagate self._dt to TF tensors used by run_simulation_tf and step_full_tf."""
@@ -865,7 +883,7 @@ class System:
     # ── tf-fast chunked run ───────────────────────────────────────────────────
 
     def run_fast(self, n_steps, cand_check_interval=10, diagnostics=False,
-                 use_tf_function=False):
+                 use_tf_function=None):
         """
         Run n_steps using run_simulation_tf (tf.while_loop, static prim_data).
 
@@ -879,11 +897,13 @@ class System:
         n_steps             : int   — steps to advance
         cand_check_interval : int   — Python candidacy callback every N steps (default 10)
         diagnostics         : bool  — if True, return diag dict; else return self
-        use_tf_function     : bool  — forwarded to run_simulation_tf. When True,
-                              the inner tf.while_loop runs as a single graph
+        use_tf_function     : bool or None — when not None, forwarded to
+                              run_simulation_tf. When None (default), falls back
+                              to self.use_tf_function (set on the System
+                              constructor or via the property). When True, the
+                              inner tf.while_loop runs as a single graph
                               (fewer per-iteration CPU↔GPU round-trips, larger
-                              gain on virtualised PCIe like Colab). Default False
-                              preserves existing behaviour.
+                              gain on virtualised PCIe like Colab).
 
         Returns
         -------
@@ -892,6 +912,9 @@ class System:
         """
         import tensorflow as tf
         from src.simulation.tf_sim import run_simulation_tf, DTYPE, NP_DTYPE
+
+        if use_tf_function is None:
+            use_tf_function = self._use_tf_function
 
         step_offset = self.step_count
         phys_state  = {k: v for k, v in self._state.items() if k not in ('t', 'step')}
@@ -996,7 +1019,7 @@ class System:
     # ── batch run ─────────────────────────────────────────────────────────────
 
     def run(self, N, sample_every=None, callback=None, record_initial=True,
-            cand_check_interval=10, verbose=True, use_tf_function=False):
+            cand_check_interval=10, verbose=True, use_tf_function=None):
         """
         Run N steps in chunks of sample_every, recording to self.frames /
         self.callback_data / self.diag.
@@ -1016,14 +1039,18 @@ class System:
         record_initial      : bool — record snapshot/callback before first step
         cand_check_interval : int  — C++ candidacy poll interval (default 10)
         verbose             : bool — print progress every 20% of chunks (default True)
-        use_tf_function     : bool — forwarded to run_fast → run_simulation_tf.
-                              When True, each chunk's tf.while_loop runs as a
-                              single graph (fewer per-iteration CPU↔GPU round-
-                              trips). Larger gain on virtualised PCIe (Colab).
-                              First chunk pays one ~5–10s trace cost. Default
-                              False preserves existing behaviour.
+        use_tf_function     : bool or None — when not None, forwarded to
+                              run_fast → run_simulation_tf. When None (default),
+                              falls back to self.use_tf_function (set on the
+                              System constructor or via the property). When True,
+                              each chunk's tf.while_loop runs as a single graph
+                              (fewer per-iteration CPU↔GPU round-trips, larger
+                              gain on virtualised PCIe like Colab). First chunk
+                              pays one ~5–10s trace cost.
         """
         import time as _time
+        if use_tf_function is None:
+            use_tf_function = self._use_tf_function
         if sample_every is None:
             sample_every = N
 
