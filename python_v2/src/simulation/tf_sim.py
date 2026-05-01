@@ -1340,7 +1340,7 @@ def update_particles_from_state(particles, state):
 def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
                       skin, prim_data=None, R0_max=1.0,
                       cand_check_interval=10, diagnostics=False,
-                      step_offset=0):
+                      step_offset=0, use_tf_function=False):
     """
     Run n_steps using tf.while_loop with C++ candidacy via tf.py_function.
 
@@ -1367,6 +1367,11 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
                           Used when running in chunks: pass chunk_i * steps_per_chunk
                           so that t = (step_offset + local_idx) * dt is correct
                           for moving primitives across chunk boundaries.
+    use_tf_function     : bool — if True, wrap the tf.while_loop in a tf.function
+                          so the entire loop runs as a single graph (eliminates
+                          per-iteration eager-dispatch overhead). Costs one ~5–10s
+                          trace on the first call per call-site. Default False
+                          preserves the original eager dispatch behaviour.
 
     Returns
     -------
@@ -1447,11 +1452,22 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     step_init = tf.constant(step_offset, dtype=tf.int32)
     max_init  = tf.constant(0.0, dtype=dtype)
 
-    final_state, _, _, max_closing_ratio_chunk = tf.while_loop(
-        loop_cond,
-        loop_body,
-        loop_vars=(state0, CapCand_init, step_init, max_init),
-        parallel_iterations=1)
+    def _exec_loop():
+        return tf.while_loop(
+            loop_cond,
+            loop_body,
+            loop_vars=(state0, CapCand_init, step_init, max_init),
+            parallel_iterations=1)
+
+    if use_tf_function:
+        # Graph-compile the while_loop so all n_steps iterations dispatch
+        # as a single graph execution (no per-iteration Python/runtime tick).
+        # tf.py_function inside the loop body still works in graph mode
+        # (it's only XLA jit_compile=True that forbids py_function).
+        # Pays a ~5–10s trace cost on first call per closure signature.
+        final_state, _, _, max_closing_ratio_chunk = tf.function(_exec_loop)()
+    else:
+        final_state, _, _, max_closing_ratio_chunk = _exec_loop()
 
     if diagnostics:
         diag = dict(
