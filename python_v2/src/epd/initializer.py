@@ -416,8 +416,16 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
     _pd = [prim_data]
 
     def _relax_block(st, n_steps):
-        """Run n_steps of relax via run_simulation_tf (one wrapped tf.while_loop
-        per call, optionally graph-compiled). Returns the wrapped state.
+        """Run n_steps of relax via run_simulation_tf (one tf.while_loop call).
+        Returns the wrapped state.
+
+        NOTE: use_tf_function is forced to False inside the swell regardless of
+        the caller's preference. The current wrap rebuilds a tf.function on
+        every call, so adaptive_swell's many short relax_blocks would trigger a
+        5–10s retrace each — net negative for swell. The wrap is only a win for
+        long single-chunk calls (sys.run with large n_steps). Followup task:
+        cache the compiled runner so the wrap composes with repeated short
+        calls; until then, swell uses cand_check_interval as the only lever.
 
         For the swell, alpha is forced to swell_alpha by overriding the TF
         scalar inside `params` for the duration of the call, then restored.
@@ -439,7 +447,7 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
                 cand_check_interval=cand_check_interval,
                 diagnostics=False,
                 step_offset=0,
-                use_tf_function=use_tf_function,
+                use_tf_function=False,    # forced — see docstring above
             )
         finally:
             if _alpha_save is not None:
@@ -496,8 +504,7 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
     n_init = min(n_relax, 3000)
     if verbose:
         print(f"  Initial relax: {n_init} steps "
-              f"(cand_check_interval={cand_check_interval}, "
-              f"use_tf_function={use_tf_function}) ...")
+              f"(cand_check_interval={cand_check_interval}) ...")
     state = _relax_block(state, n_init)
 
     # Update cm_mgr with current box
