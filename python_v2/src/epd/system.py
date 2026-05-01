@@ -864,7 +864,8 @@ class System:
 
     # ── tf-fast chunked run ───────────────────────────────────────────────────
 
-    def run_fast(self, n_steps, cand_check_interval=10, diagnostics=False):
+    def run_fast(self, n_steps, cand_check_interval=10, diagnostics=False,
+                 use_tf_function=False):
         """
         Run n_steps using run_simulation_tf (tf.while_loop, static prim_data).
 
@@ -878,6 +879,11 @@ class System:
         n_steps             : int   — steps to advance
         cand_check_interval : int   — Python candidacy callback every N steps (default 10)
         diagnostics         : bool  — if True, return diag dict; else return self
+        use_tf_function     : bool  — forwarded to run_simulation_tf. When True,
+                              the inner tf.while_loop runs as a single graph
+                              (fewer per-iteration CPU↔GPU round-trips, larger
+                              gain on virtualised PCIe like Colab). Default False
+                              preserves existing behaviour.
 
         Returns
         -------
@@ -908,6 +914,7 @@ class System:
             cand_check_interval=cand_check_interval,
             diagnostics=diagnostics,
             step_offset=step_offset,
+            use_tf_function=use_tf_function,
         )
 
         if diagnostics:
@@ -989,7 +996,7 @@ class System:
     # ── batch run ─────────────────────────────────────────────────────────────
 
     def run(self, N, sample_every=None, callback=None, record_initial=True,
-            cand_check_interval=10, verbose=True):
+            cand_check_interval=10, verbose=True, use_tf_function=False):
         """
         Run N steps in chunks of sample_every, recording to self.frames /
         self.callback_data / self.diag.
@@ -1009,6 +1016,12 @@ class System:
         record_initial      : bool — record snapshot/callback before first step
         cand_check_interval : int  — C++ candidacy poll interval (default 10)
         verbose             : bool — print progress every 20% of chunks (default True)
+        use_tf_function     : bool — forwarded to run_fast → run_simulation_tf.
+                              When True, each chunk's tf.while_loop runs as a
+                              single graph (fewer per-iteration CPU↔GPU round-
+                              trips). Larger gain on virtualised PCIe (Colab).
+                              First chunk pays one ~5–10s trace cost. Default
+                              False preserves existing behaviour.
         """
         import time as _time
         if sample_every is None:
@@ -1031,7 +1044,8 @@ class System:
         for ci in range(n_full):
             d = self.run_fast(sample_every,
                               cand_check_interval=cand_check_interval,
-                              diagnostics=True)
+                              diagnostics=True,
+                              use_tf_function=use_tf_function)
             self.diag.append(d)
             self._check_disp_watchdog(d.get('max_closing_ratio_chunk', 0.0), ci + 1)
             _record(ci + 1)
@@ -1042,7 +1056,8 @@ class System:
         if remain > 0:
             d = self.run_fast(remain,
                               cand_check_interval=cand_check_interval,
-                              diagnostics=True)
+                              diagnostics=True,
+                              use_tf_function=use_tf_function)
             self.diag.append(d)
             self._check_disp_watchdog(d.get('max_closing_ratio_chunk', 0.0), n_full + 1)
             _record(n_full + 1)
