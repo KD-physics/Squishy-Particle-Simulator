@@ -1384,7 +1384,8 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     # Initial candidacy
     xc0 = np.ascontiguousarray(state0['x_cm'].numpy(), dtype=np.float64)
     th0 = np.ascontiguousarray(state0['theta'].numpy(), dtype=np.float64)
-    mgr_cpp.update(xc0, th0)
+    xa0 = np.ascontiguousarray(state0['x_all'].numpy(), dtype=np.float64)
+    mgr_cpp.update(xc0, th0, x_all=xa0)
 
     K = mgr_cpp.P * mgr_cpp.N
     E = mgr_cpp.E
@@ -1403,16 +1404,22 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     n_cand_checks  = [0]
     n_cand_updates = [0]
 
-    def candidacy_step(x_cm, theta):
-        """Python callback: update C++ candidacy only when skin threshold exceeded."""
+    def candidacy_step(x_cm, theta, x_all):
+        """Python callback: update C++ candidacy only when skin threshold exceeded.
+
+        x_all is plumbed through for managers that need per-node positions
+        (e.g., PRCM). Production CM ignores it.
+        """
         n_cand_checks[0] += 1
         xc = x_cm.numpy()
         th = theta.numpy()
+        xa = x_all.numpy()
         dx  = float(np.max(np.linalg.norm(xc - last_xc[0], axis=1)))
         dth = float(np.max(np.abs(th - last_th[0])))
         if (dx + R0_max * dth) > skin_thresh:
             mgr_cpp.update(np.ascontiguousarray(xc, dtype=np.float64),
-                           np.ascontiguousarray(th, dtype=np.float64))
+                           np.ascontiguousarray(th, dtype=np.float64),
+                           x_all=np.ascontiguousarray(xa, dtype=np.float64))
             last_xc[0] = xc.copy()
             last_th[0] = th.copy()
             n_cand_updates[0] += 1
@@ -1427,7 +1434,7 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
             tf.equal(step_idx % cand_interval_tf, 0),
             true_fn=lambda: tf.ensure_shape(
                 tf.py_function(candidacy_step,
-                               [state['x_cm'], state['theta']],
+                               [state['x_cm'], state['theta'], state['x_all']],
                                Tout=tf.int32),
                 [K, E]),
             false_fn=lambda: CapCand,

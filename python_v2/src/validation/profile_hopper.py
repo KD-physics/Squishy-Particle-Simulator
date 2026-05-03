@@ -68,7 +68,7 @@ def size_hopper(P, R0_mean=1.0, N_nodes=60, phi_target=0.40,
 
 def build_test_bed(P, N_nodes=60, scale=1.0, seed=42, verbose=True,
                    Bo=0.05, kappa=0.02, Oh=0.15, ptype='emulsion', nu=0.5,
-                   E_candidates=None):
+                   E_candidates=None, candidacy_kind='production'):
     """Build the hopper test bed with the given physics knobs.
 
     ptype='emulsion':  uses kappa, Oh.  Bo = g (with γ=ρ=R0=1).
@@ -80,7 +80,8 @@ def build_test_bed(P, N_nodes=60, scale=1.0, seed=42, verbose=True,
     LY = Y_BOT + geom['funnel_h'] + geom['H_RES'] + 8.0  # 8 R0 headroom
     X_C = LX / 2.0
 
-    sys_kwargs = dict(periodic_x=False, periodic_y=False, g=float(Bo))
+    sys_kwargs = dict(periodic_x=False, periodic_y=False, g=float(Bo),
+                      candidacy_kind=candidacy_kind)
     if E_candidates is not None:
         sys_kwargs['E_candidates'] = int(E_candidates)
     sys_h = System(LX, LY, **sys_kwargs)

@@ -1,0 +1,81 @@
+
+=== Skipping cell 2 (de0d687f) ===
+
+=== Executing cell 4 (5ce7fc41) ===
+Outputs -> out/couette_T1_local_test
+
+=== Executing cell 6 (49306cb6) ===
+P=635, N_nodes=60, target_phi=0.84
+Initial cell: R_in=12.5, R_out=50.0, Lx=105.0
+Drive: Omega=0.002, dt_factor=0.5, 1 × 50000 = 50000 steps
+
+=== Executing cell 8 (e16b788f) ===
+2026-05-02 23:33:13.551418: I tensorflow/core/util/port.cc:113] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-05-02 23:33:13.576574: E external/local_xla/xla/stream_executor/cuda/cuda_dnn.cc:9261] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+2026-05-02 23:33:13.576622: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:607] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2026-05-02 23:33:13.577429: E external/local_xla/xla/stream_executor/cuda/cuda_blas.cc:1515] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+2026-05-02 23:33:13.581393: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2026-05-02 23:33:14.144152: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT
+
+=== Executing cell 10 (99c739fc) ===
+[resume] post-swell state found but no drive checkpoint; will re-run phase 2 (relax)
+
+=== Executing cell 12 (65239f15) ===
+[phase 1] STATE_SWELL exists — initializing minimal then restoring
+2026-05-02 23:33:17.541600: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.582498: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.582572: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.584312: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.584375: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.584401: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.710300: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.710383: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.710392: I tensorflow/core/common_runtime/gpu/gpu_device.cc:2022] Could not identify NUMA node of platform GPU id 0, defaulting to 0.  Your kernel may not have been built with NUMA support.
+2026-05-02 23:33:17.710421: I external/local_xla/xla/stream_executor/cuda/cuda_executor.cc:887] could not open file to read NUMA node: /sys/bus/pci/devices/0000:01:00.0/numa_node
+Your kernel may have been built without NUMA support.
+2026-05-02 23:33:17.710442: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1929] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 7535 MB memory:  -> device: 0, name: NVIDIA GeForce RTX 3080, pci bus id: 0000:01:00.0, compute capability: 8.6
+[phase 1] 2.9s  R_in=7.969  R_out=31.876  phi=0.8458  Lx=66.940
+
+=== Executing cell 14 (c956ccae) ===
+[phase 2] alpha forced to 10.0 for relax
+[phase 2] relax 15000 steps  dt_factor=0.5
+2026-05-02 23:33:20.853200: I external/local_xla/xla/service/service.cc:168] XLA service 0x555b0205aa80 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
+2026-05-02 23:33:20.853258: I external/local_xla/xla/service/service.cc:176]   StreamExecutor device (0): NVIDIA GeForce RTX 3080, Compute Capability 8.6
+2026-05-02 23:33:20.941996: I tensorflow/compiler/mlir/tensorflow/utils/dump_mlir_util.cc:269] disabling MLIR crash reproducer, set env var `MLIR_CRASH_REPRODUCER_DIRECTORY` to enable.
+2026-05-02 23:33:22.247777: I external/local_xla/xla/stream_executor/cuda/cuda_dnn.cc:454] Loaded cuDNN version 8904
+2026-05-02 23:33:22.276180: I external/local_tsl/tsl/platform/default/subprocess.cc:304] Start cannot spawn child process: No such file or directory
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1777779203.519029   11542 device_compiler.h:186] Compiled cluster using XLA!  This line is logged at most once for the lifetime of the process.
+WARNING (watchdog): chunk 1  ρ_contact = 0.184  >  strong 0.10.  Reduce dt_factor by ~3.7x (currently 0.500).
+[phase 2] 77.8s  rho_max=0.0000  phi_outer=0.8446
+  snapshot -> after_relax.png
+
+=== Executing cell 16 (af428eef) ===
+[phase 3] inner ring: 22 droplets (gap 35.1°)
+[phase 3] outer ring: 80 droplets (gap 8.7°)
+
+=== Executing cell 18 (545eee80) ===
+[phase 4] 1×50000 steps  Omega=0.002  dt_factor=0.5  start_seg=0
+  segment 1/1  step=50000  sim_t=67.28  +41 frames  (253s)  rho_max=0.0012  -> segment_001.npz
+  preview → preview_step050k.mp4
+[phase 4] 285s total drive (this run)
+
+=== Executing cell 20 (4f9b6a99) ===
+[save] concatenating 1 segments → drive_data.npz ...
+[save] 0.8s -> out/couette_T1_local_test/drive_data.npz  (0.08 GB)
+
+[render] cumulative movie from segment files ...
+[render] 42s -> out/couette_T1_local_test/full.mp4
+
+[total] 6.8 min
+
+=== ALL NOTEBOOK CELLS PASSED ===

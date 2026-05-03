@@ -117,7 +117,7 @@ class CandidacyManager:
         dtheta  = np.max(np.abs(theta - self._last_theta))
         return (dx + self.R0 * dtheta) > self.skin * 0.5
 
-    def update(self, x_cm, theta, x_all=None):
+    def update(self, x_cm, theta):
         """
         Recompute CapCandidates from current particle centers and orientations.
         Writes CapCandidates in place.
@@ -126,10 +126,6 @@ class CandidacyManager:
         ----------
         x_cm  : (P, 2) float64 — particle centers
         theta : (P,)   float64 — particle orientations
-        x_all : (P, N, 2) float64 or None — per-node positions. Production
-                CM only uses CM/orientation, but the unified callback signature
-                in tf_sim passes it for managers that need it (e.g., PRCM).
-                Ignored here.
         """
         x_cm  = np.asarray(x_cm,  dtype=np.float64)
         theta = np.asarray(theta, dtype=np.float64)
