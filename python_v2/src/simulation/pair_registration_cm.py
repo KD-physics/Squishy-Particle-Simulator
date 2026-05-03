@@ -36,7 +36,38 @@ initialize-time after particle realization.
 import threading
 import numpy as np
 
-from src.simulation import _pair_registration_cm as _ext
+
+def _load_prcm_ext():
+    # Standard import — works when src/ is the installed package (.so sits
+    # alongside this .py file). Breaks on Colab when cwd shadows the install:
+    # cwd's src/ is a regular package locked to the source tree, so the
+    # dist-packages .so becomes invisible. Fall back to a sys.path scan that
+    # loads the .so directly by file location.
+    try:
+        from src.simulation import _pair_registration_cm as _ext
+        return _ext
+    except ImportError:
+        pass
+    import sys, os, glob, importlib.util
+    for p in sys.path:
+        if not p or not os.path.isdir(p):
+            continue
+        for pat in ('src/simulation/_pair_registration_cm*.so',
+                    'src/simulation/_pair_registration_cm*.pyd'):
+            for so in glob.glob(os.path.join(p, pat)):
+                spec = importlib.util.spec_from_file_location(
+                    'src.simulation._pair_registration_cm', so)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod
+    raise ImportError(
+        "_pair_registration_cm extension not found. Build it with "
+        "`pip install .` from python_v2/. If pip succeeded but you're "
+        "running from inside python_v2/ (notebook cwd shadows the install), "
+        "re-run pip with -e (editable) so the .so lands in the source tree.")
+
+
+_ext = _load_prcm_ext()
 
 
 class PairRegistrationCM:
