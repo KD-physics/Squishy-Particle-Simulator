@@ -1458,10 +1458,15 @@ class System:
         P       = x_all.shape[0]
         r_c_arr = self._params['r_c_per_p'].numpy()
 
-        # Distinguish elastic vs emulsion by particle type
+        # Distinguish elastic vs emulsion by particle type (drives edge styling)
         from src.simulation.emulsion_particle import EmulsionParticle
         is_emulsion = [isinstance(p, EmulsionParticle) for p in self._particles]
 
+        # Fallback colormaps used only if _particle_colors isn't populated
+        # (e.g. legacy callers that bypass initialize). Honoring _particle_colors
+        # keeps render() consistent with make_movie() and respects user-set
+        # palettes from set_color_palette().
+        use_user_colors = (len(self._particle_colors) == P)
         colors_e  = plt.cm.tab20(np.linspace(0, 1, max(P, 1)))
         colors_em = plt.cm.cool(np.linspace(0.2, 0.9, max(P, 1)))
         ei = 0;  emi = 0
@@ -1476,10 +1481,12 @@ class System:
         for i in range(P):
             outer = self._outer_contour(x_all[i], x_cm_np[i], r_c_arr[i])
             if is_emulsion[i]:
-                c = colors_em[emi % len(colors_em)];  emi += 1
+                c = self._particle_colors[i] if use_user_colors else colors_em[emi % len(colors_em)]
+                emi += 1
                 fc, ec, lw, alpha = c, 'steelblue', 0.9, 0.70
             else:
-                c = colors_e[ei % len(colors_e)];     ei  += 1
+                c = self._particle_colors[i] if use_user_colors else colors_e[ei % len(colors_e)]
+                ei  += 1
                 fc, ec, lw, alpha = c, 'k', 0.7, 0.72
 
             for odx, ody in img_offsets:
