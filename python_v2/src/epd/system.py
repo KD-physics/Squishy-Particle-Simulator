@@ -229,6 +229,14 @@ class System:
                 self._particle_colors.append(palette_e[ei % len(palette_e)])
                 ei += 1
 
+    def set_color_palette(self, name, seed=None):
+        """Randomly recolor every particle from the named palette in
+        src.epd.palettes.PALETTES. See palettes.py for available names
+        ('palette1' through 'palette12'). Call after particles are realized
+        but before any per-particle override (e.g., driven-ring tinting)."""
+        from src.epd.palettes import apply_palette
+        return apply_palette(self, name, seed=seed)
+
     # ── initialization ────────────────────────────────────────────────────────
 
     def initialize(self, phi_target=0.80, seed=42, verbose=True,
