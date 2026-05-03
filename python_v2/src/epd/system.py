@@ -49,7 +49,8 @@ class System:
                  disp_advisory=0.05,
                  disp_strong=0.10,
                  disp_critical=0.20,
-                 use_tf_function=False):
+                 use_tf_function=False,
+                 candidacy_kind='production'):
         self.Lx = float(Lx)
         self.Ly = float(Ly)
         self._config = {
@@ -61,6 +62,10 @@ class System:
         self._E_candidates  = int(E_candidates)
         self._skin          = float(skin)
         self._g_val         = float(g)
+        self._candidacy_kind = str(candidacy_kind)
+        if self._candidacy_kind not in ('production', 'prcm'):
+            raise ValueError(f"candidacy_kind must be 'production' or 'prcm', "
+                              f"got {self._candidacy_kind!r}")
         self._disp_advisory = float(disp_advisory)
         self._disp_strong   = float(disp_strong)
         self._disp_critical = float(disp_critical)
@@ -177,6 +182,33 @@ class System:
         self._disp_advisory_fired = False
         self._max_disp_ratio_run  = 0.0
         return self
+
+    def _build_cm(self, P, N_val, R0_arr, particles):
+        """Construct the candidacy manager — production sliding-fill or PRCM
+        depending on self._candidacy_kind.
+        """
+        from src.simulation.candidacy_manager import CandidacyManager
+        if self._candidacy_kind == 'prcm':
+            from src.simulation.pair_registration_cm import PairRegistrationCM
+            r_c_arr = np.array([p.r_c for p in particles])
+            return PairRegistrationCM(
+                P=P, N=N_val, R0_arr=R0_arr, r_c_per_p=r_c_arr,
+                Lx=self.Lx, Ly=self.Ly,
+                M1=20, M2=10,
+                delta=(self._E_candidates - 1) // 2,
+                periodic_x=self._config['periodic_x'],
+                periodic_y=self._config['periodic_y'])
+        return CandidacyManager(
+            P=P, N=N_val,
+            R0=float(np.mean(R0_arr)),
+            E=self._E_candidates,
+            skin=self._skin * float(np.mean(R0_arr)),
+            periodic=self._config['periodic_x'] and self._config['periodic_y'],
+            periodic_x=self._config['periodic_x'],
+            periodic_y=self._config['periodic_y'],
+            Lx=self.Lx, Ly=self.Ly,
+            R0_arr=R0_arr,
+        )
 
     def _assign_particle_colors(self):
         """Auto-assign per-particle colors from palette (or p.color if set)."""
@@ -339,22 +371,13 @@ class System:
         params['_g_tf']     = tf.constant(NP_DTYPE(self._g_val))   # stable ref for retrace fix
         params['_v_mem']    = tf.constant(NP_DTYPE(v_mem))
 
-        # 5. Candidacy manager
+        # 5. Candidacy manager (production sliding-fill or PRCM, opt-in)
         P      = len(particles)
         N_val  = particles[0].N
         R0_arr = np.array([p.R0 for p in particles])
-        cm_mgr = CandidacyManager(
-            P=P, N=N_val,
-            R0=float(np.mean(R0_arr)),
-            E=self._E_candidates,
-            skin=self._skin * float(np.mean(R0_arr)),
-            periodic=self._config['periodic_x'] and self._config['periodic_y'],
-            periodic_x=self._config['periodic_x'],
-            periodic_y=self._config['periodic_y'],
-            Lx=self.Lx, Ly=self.Ly,
-            R0_arr=R0_arr,
-        )
-        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
+        cm_mgr = self._build_cm(P, N_val, R0_arr, particles)
+        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy(),
+                       x_all=state['x_all'].numpy())
 
         # 6. Build prim_data
         t_now    = 0.0
@@ -459,7 +482,8 @@ class System:
         self._g_tf     = tf.constant(NP_DTYPE(self._g_val))
 
         # Rebuild candidacy at final positions
-        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
+        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy(),
+                       x_all=state['x_all'].numpy())
 
         if verbose:
             phi = compute_phi_outer(state, self.Lx, self.Ly, r_c_arr,
@@ -534,18 +558,9 @@ class System:
         # 4. CandidacyManager — identical parameters to TF test defaults
         R0_arr = np.array([p.R0 for p in particles])
         N_val  = p0.N
-        cm_mgr = CandidacyManager(
-            P=P, N=N_val,
-            R0=float(np.mean(R0_arr)),
-            E=self._E_candidates,
-            skin=self._skin * float(np.mean(R0_arr)),
-            periodic=(self._config['periodic_x'] and self._config['periodic_y']),
-            periodic_x=self._config['periodic_x'],
-            periodic_y=self._config['periodic_y'],
-            Lx=self.Lx, Ly=self.Ly,
-            R0_arr=R0_arr,
-        )
-        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
+        cm_mgr = self._build_cm(P, N_val, R0_arr, particles)
+        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy(),
+                       x_all=state['x_all'].numpy())
 
         # 5. prim_data at t=0 from registered objects
         prim_list = []
@@ -842,7 +857,8 @@ class System:
             x_cm_np  = phys_state['x_cm'].numpy()
             theta_np = phys_state['theta'].numpy()
             if self._cm_mgr.needs_update(x_cm_np, theta_np):
-                self._cm_mgr.update(x_cm_np, theta_np)
+                self._cm_mgr.update(x_cm_np, theta_np,
+                                     x_all=phys_state['x_all'].numpy())
 
             # TF step
             t_tf = tf.constant(NP_DTYPE(t_val), dtype=DTYPE)
@@ -1167,6 +1183,18 @@ class System:
         for k, v in self._state.items():
             if hasattr(v, 'numpy'):
                 arrays[k] = v.numpy()
+        # Persist registered-object geometry exactly so restore_state doesn't
+        # have to reconstruct via affine rescale (which can drift relative to
+        # particle positions over many compression cycles).
+        for oi, obj in enumerate(self._objects):
+            cls = obj.__class__.__name__
+            arrays[f'obj{oi}_class'] = np.array(cls)
+            if hasattr(obj, '_origin'):
+                arrays[f'obj{oi}_origin'] = np.asarray(obj._origin, dtype=np.float64)
+            if hasattr(obj, '_inner_r'):
+                arrays[f'obj{oi}_inner_r'] = np.float64(obj._inner_r)
+            if hasattr(obj, '_outer_r'):
+                arrays[f'obj{oi}_outer_r'] = np.float64(obj._outer_r)
         np.savez(str(out), **arrays)
         return out
 
@@ -1189,13 +1217,39 @@ class System:
         Lx_ckpt  = float(ckpt['Lx'])
         Ly_ckpt  = float(ckpt['Ly'])
 
-        # Rescale objects from current box to checkpoint box
+        # Rescale objects from current box to checkpoint box (fallback path)
         f = Lx_ckpt / self.Lx
         for obj in self._objects:
             if hasattr(obj, 'rescale'):
                 obj.rescale(f)
         self.Lx = Lx_ckpt
         self.Ly = Ly_ckpt
+
+        # Override with EXACT object geometry if persisted in the checkpoint.
+        # This avoids accumulated drift between particle positions and
+        # affine-reconstructed object positions over many compression cycles.
+        for oi, obj in enumerate(self._objects):
+            ok_orig = f'obj{oi}_origin'  in ckpt.files
+            ok_inr  = f'obj{oi}_inner_r' in ckpt.files
+            ok_outr = f'obj{oi}_outer_r' in ckpt.files
+            if not (ok_orig or ok_inr or ok_outr):
+                continue
+            if ok_orig and hasattr(obj, '_origin'):
+                obj._origin = np.array(ckpt[f'obj{oi}_origin'], dtype=np.float64)
+            if ok_inr and hasattr(obj, '_inner_r'):
+                obj._inner_r = float(ckpt[f'obj{oi}_inner_r'])
+            if ok_outr and hasattr(obj, '_outer_r'):
+                obj._outer_r = float(ckpt[f'obj{oi}_outer_r'])
+            # If this is a CompositeObject, rebuild children to reflect new radii
+            if hasattr(obj, '_children') and ok_inr and ok_outr:
+                from src.epd.objects import ArcWall
+                obj._children = []
+                outer = ArcWall((0, 0), obj._outer_r, convex=False)
+                outer.set_exclusion('exterior')
+                obj.add_primitive(outer)
+                inner = ArcWall((0, 0), obj._inner_r, convex=True)
+                inner.set_exclusion('interior')
+                obj.add_primitive(inner)
 
         # Restore integration scalars
         self._dt         = float(ckpt['dt'])
@@ -1232,19 +1286,11 @@ class System:
         # Rebuild CandidacyManager at new scale
         R0_arr = np.array([p.R0 for p in self._particles])
         N_val  = self._particles[0].N
-        self._cm_mgr = CandidacyManager(
-            P=len(self._particles), N=N_val,
-            R0=float(np.mean(R0_arr)),
-            E=self._E_candidates,
-            skin=self._skin * float(np.mean(R0_arr)),
-            periodic=self._config['periodic_x'] and self._config['periodic_y'],
-            periodic_x=self._config['periodic_x'],
-            periodic_y=self._config['periodic_y'],
-            Lx=self.Lx, Ly=self.Ly,
-            R0_arr=R0_arr,
-        )
+        self._cm_mgr = self._build_cm(len(self._particles), N_val, R0_arr,
+                                        self._particles)
         self._cm_mgr.update(self._state['x_cm'].numpy(),
-                            self._state['theta'].numpy())
+                            self._state['theta'].numpy(),
+                            x_all=self._state['x_all'].numpy())
         return self
 
     def set_driven_particles(self, indices, traj_rows, frozen=True):

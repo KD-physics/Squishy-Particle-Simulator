@@ -467,7 +467,8 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         Python control between steps (currently unused after the relax-loop
         rewrite, but kept for back-compat / future use)."""
         if cm_mgr.needs_update(st['x_cm'].numpy(), st['theta'].numpy()):
-            cm_mgr.update(st['x_cm'].numpy(), st['theta'].numpy())
+            cm_mgr.update(st['x_cm'].numpy(), st['theta'].numpy(),
+                           x_all=st['x_all'].numpy())
         caps    = tf.constant(cm_mgr.CapCandidates, dtype=tf.int32)
         st, _   = step_full_tf(st, caps, dt_tf, alpha_tf, g_tf,
                                 params, t=tf.constant(NP_DTYPE(0.0)),
@@ -529,7 +530,8 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         state = _wrap(state, Lx, Ly)
         cm_mgr.Lx = Lx; cm_mgr.Ly = Ly
         set_periodic_box(params, Lx, Ly)
-        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy())
+        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy(),
+                       x_all=state['x_all'].numpy())
         _rescale_objects(scale)
 
         # Quick assessment after compression
