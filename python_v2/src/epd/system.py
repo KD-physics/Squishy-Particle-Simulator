@@ -101,6 +101,7 @@ class System:
         self.callback_data    = []   # callback() return dicts
         self.diag             = []   # per-chunk plumbing dicts
         self._particle_colors = []   # auto-assigned or user-set
+        self._pending_palette = None # (name, seed) deferred from set_color_palette
 
     # ── dt / dt_factor sync API ───────────────────────────────────────────────
     # Two equivalent ways to control the integration step.  Setting either
@@ -211,7 +212,22 @@ class System:
         )
 
     def _assign_particle_colors(self):
-        """Auto-assign per-particle colors from palette (or p.color if set)."""
+        """Auto-assign per-particle colors from palette (or p.color if set).
+
+        Honors user-set palettes:
+          - If a palette name was set via set_color_palette() before particles
+            were realized, apply it now.
+          - If _particle_colors is already populated (matches len(_particles)),
+            assume the user assigned them and skip the default.
+        """
+        if getattr(self, '_pending_palette', None) is not None:
+            from src.epd.palettes import apply_palette
+            name, seed = self._pending_palette
+            apply_palette(self, name, seed=seed)
+            self._pending_palette = None
+            return
+        if len(self._particle_colors) == len(self._particles):
+            return
         from src.simulation.emulsion_particle import EmulsionParticle
         palette_e  = ['cornflowerblue', 'salmon', 'mediumseagreen', 'orchid',
                       'goldenrod', 'lightcoral', 'steelblue', 'sandybrown']
@@ -231,10 +247,22 @@ class System:
 
     def set_color_palette(self, name, seed=None):
         """Randomly recolor every particle from the named palette in
-        src.epd.palettes.PALETTES. See palettes.py for available names
-        ('palette1' through 'palette12'). Call after particles are realized
-        but before any per-particle override (e.g., driven-ring tinting)."""
-        from src.epd.palettes import apply_palette
+        src.epd.palettes.PALETTES (e.g. 'palette1' through 'palette12').
+
+        Safe to call anywhere in the build sequence:
+          - Before initialize(): defers; palette is applied automatically
+            once particles are realized.
+          - After initialize(): applies immediately.
+        Either way, the palette survives any later auto-color call inside
+        initialize(). Per-particle overrides (e.g. driven-ring tinting in
+        set_driven_particles handlers) should still come last."""
+        from src.epd.palettes import apply_palette, PALETTES
+        if name not in PALETTES:
+            raise ValueError(f"unknown palette {name!r}; "
+                              f"available: {sorted(PALETTES)}")
+        if len(self._particles) == 0:
+            self._pending_palette = (name, seed)
+            return None
         return apply_palette(self, name, seed=seed)
 
     # ── initialization ────────────────────────────────────────────────────────
