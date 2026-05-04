@@ -324,9 +324,24 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
     T_reg   = tf.reduce_sum(r[:,:,0]*f_reg[:,:,1]   - r[:,:,1]*f_reg[:,:,0],   axis=1)
     T       = T_total - T_el - T_reg                                     # (P,)
 
-    # ── undamped Verlet: rigid body ───────────────────────────────────────────
+    # ── rigid-body integration with optional dissipation ─────────────────────
+    # Semi-implicit Euler: v_new = (v_old + F/M·dt) / (1 + β·dt)
+    # β has units 1/time and damps the rigid-body modes (v_cm and omega).
+    # Distinct from xi_drag (per-node Stokes drag, physical). beta_rb is a
+    # numerical knob for ad-hoc energy vacuum during initialization / settle.
+    # Default zero → no effect (backwards-compatible Newtonian integration).
+    # Per-particle override: beta_rb_per_p; scalar fallback: _beta_rb_tf.
     v_cm_free  = v_cm  + (F / M_disk[:, None]) * dt
     omega_free = omega + (T / I_disk) * dt
+    _beta_pp   = params.get('beta_rb_per_p', tf.zeros_like(M_disk))
+    _beta_any  = tf.reduce_any(_beta_pp > 0.0)
+    _beta_scal = params.get('_beta_rb_tf', tf.constant(0.0, dtype=DTYPE))
+    beta_p     = tf.where(_beta_any,
+                          _beta_pp,
+                          tf.fill(tf.shape(M_disk), _beta_scal))     # (P,)
+    inv_factor = 1.0 / (1.0 + beta_p * dt)                            # (P,)
+    v_cm_free  = v_cm_free  * inv_factor[:, None]
+    omega_free = omega_free * inv_factor
 
     # ── driven-particle override ──────────────────────────────────────────────
     if 'driven_mask' in params and 'traj' in params:

@@ -40,6 +40,7 @@ class System:
                  periodic_x=True, periodic_y=True,
                  dt_factor=1.5,
                  alpha_damp=None,
+                 beta_rb=0.0,
                  E_candidates=32,
                  skin=1.0,
                  g=0.0,
@@ -59,6 +60,12 @@ class System:
         }
         self._dt_factor     = float(dt_factor) if dt_factor is not None else 0.4
         self._alpha_damp    = float(alpha_damp) if alpha_damp is not None else None
+        # beta_rb: rigid-body dissipation rate [1/time]. Semi-implicit Euler in
+        # step_rb_tf damps v_cm and omega: v_new = (v_old + F/M·dt)/(1 + β·dt).
+        # Default 0 → no effect (Newtonian). Can be set via constructor or via
+        # the beta_rb property after init (see below) — assignment propagates
+        # to params['_beta_rb_tf'] used by the TF integrator.
+        self._beta_rb       = float(beta_rb)
         self._E_candidates  = int(E_candidates)
         self._skin          = float(skin)
         self._g_val         = float(g)
@@ -136,6 +143,30 @@ class System:
         if self._dt_max is not None and self._dt_max > 0:
             self._dt = v * self._dt_max
         self._sync_dt_tensors()
+
+    @property
+    def beta_rb(self):
+        """Rigid-body dissipation rate [1/time], applied semi-implicitly to
+        v_cm and omega in step_rb_tf:  v_new = (v_old + F/M·dt)/(1 + β·dt).
+
+        Default 0 → no effect (Newtonian). Useful for ad-hoc energy vacuum
+        during initialization (high β·dt drains kinetic energy quickly without
+        explicit-Euler instability). Distinct from xi_drag (per-node Stokes
+        drag, physical) — beta_rb is a numerical knob.
+
+        Setting this attribute propagates to params['_beta_rb_tf'] live."""
+        return self._beta_rb
+
+    @beta_rb.setter
+    def beta_rb(self, value):
+        import tensorflow as tf
+        from src.simulation.tf_sim import NP_DTYPE
+        v = float(value)
+        self._beta_rb = v
+        if self._params is not None:
+            DTYPE = self._params['_beta_rb_tf'].dtype if '_beta_rb_tf' in self._params \
+                    else self._params['_alpha_tf'].dtype
+            self._params['_beta_rb_tf'] = tf.constant(NP_DTYPE(v), dtype=DTYPE)
 
     @property
     def use_tf_function(self):
@@ -406,6 +437,7 @@ class System:
 
         params['_dt_tf']    = tf.constant(NP_DTYPE(dt_val))
         params['_alpha_tf'] = tf.constant(NP_DTYPE(alpha_val))
+        params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb))   # rigid-body dissipation
         params['_g_tf']     = tf.constant(NP_DTYPE(self._g_val))   # stable ref for retrace fix
         params['_v_mem']    = tf.constant(NP_DTYPE(v_mem))
 
@@ -624,6 +656,7 @@ class System:
         # Store stable tensor refs in params for retrace fix
         params['_dt_tf']    = self._dt_tf
         params['_alpha_tf'] = self._alpha_tf
+        params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb), dtype=DTYPE)
         params['_g_tf']     = self._g_tf
 
         # Per-particle alpha_damp and xi_drag (use particle attrs if set, else zeros)
@@ -1296,6 +1329,9 @@ class System:
         self._alpha_damp = float(ckpt['alpha_damp'])
         self._dt_tf      = tf.constant(NP_DTYPE(self._dt))
         self._alpha_tf   = tf.constant(NP_DTYPE(self._alpha_damp))
+        # beta_rb is a numerical knob (not saved); preserve current setting and
+        # re-push to params so the integrator picks it up
+        self._params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb), dtype=DTYPE)
         # Keep dt_factor consistent with restored dt (dt_max is unchanged)
         if self._dt_max is not None and self._dt_max > 0:
             self._dt_factor = self._dt / self._dt_max
