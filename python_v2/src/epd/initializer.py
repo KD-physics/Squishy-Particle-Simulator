@@ -434,11 +434,20 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         if n_steps <= 0:
             return st
         phys = {k: v for k, v in st.items() if k not in ('t', 'step')}
-        # Inject swell-specific damping/g into params, remember originals
-        _alpha_save = params.get('_alpha_tf')
-        _g_save     = params.get('_g_tf')
+        # Inject swell-specific damping/g into params, remember originals.
+        # Critical: kernel uses tf.where(per_p > 0, per_p, scalar) so we MUST
+        # override the per-particle alpha too — otherwise per_p (~R0_mean ≈ 1)
+        # wins and contacts ring under-damped during the swell.
+        _alpha_save    = params.get('_alpha_tf')
+        _alpha_pp_save = params.get('alpha_damp_per_p')
+        _g_save        = params.get('_g_tf')
         params['_alpha_tf'] = alpha_tf
         params['_g_tf']     = g_tf
+        if _alpha_pp_save is not None:
+            P_count = int(_alpha_pp_save.shape[0])
+            params['alpha_damp_per_p'] = tf.constant(
+                np.full(P_count, swell_alpha, dtype=np.float64),
+                dtype=_alpha_pp_save.dtype)
         try:
             new_phys = run_simulation_tf(
                 phys, dt_val, swell_alpha, 0.0,
@@ -452,6 +461,8 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         finally:
             if _alpha_save is not None:
                 params['_alpha_tf'] = _alpha_save
+            if _alpha_pp_save is not None:
+                params['alpha_damp_per_p'] = _alpha_pp_save
             if _g_save is not None:
                 params['_g_tf'] = _g_save
         # Re-attach t/step if the original state had them (they're not stepped
@@ -530,8 +541,20 @@ def adaptive_swell(state, params, cm_mgr, prim_data,
         state = _wrap(state, Lx, Ly)
         cm_mgr.Lx = Lx; cm_mgr.Ly = Ly
         set_periodic_box(params, Lx, Ly)
-        cm_mgr.update(state['x_cm'].numpy(), state['theta'].numpy(),
-                       x_all=state['x_all'].numpy())
+        # Compress is an affine rescale of every CM — invalidates L1/L2 ranking
+        # AND Q (n0, m0) basis. Force a full PRCM rebuild from scratch and
+        # reset cadence; subsequent in-relax PRCM calls then start clean.
+        # Use force_full_rebuild on PRCM if available, else fall back to the
+        # cadenced update (production CandidacyManager).
+        x_cm_np  = state['x_cm'].numpy()
+        x_all_np = state['x_all'].numpy()
+        theta_np = state['theta'].numpy()
+        if hasattr(cm_mgr, '_cpp') and hasattr(cm_mgr._cpp, 'force_full_rebuild'):
+            cm_mgr._cpp.force_full_rebuild(x_all_np, x_cm_np, theta_np)
+            # Sync the Python-side CapCandidates buffer to the freshly-built C
+            cm_mgr.CapCandidates[:] = cm_mgr._cpp.CapCandidates
+        else:
+            cm_mgr.update(x_cm_np, theta_np, x_all=x_all_np)
         _rescale_objects(scale)
 
         # Quick assessment after compression

@@ -337,7 +337,9 @@ class System:
         state, params = make_state(particles)
 
         if self._config['periodic_x'] or self._config['periodic_y']:
-            set_periodic_box(params, self.Lx, self.Ly)
+            set_periodic_box(params, self.Lx, self.Ly,
+                              periodic_x=self._config['periodic_x'],
+                              periodic_y=self._config['periodic_y'])
 
         # 2b. Wire per-particle xi_drag and alpha_damp from particle attributes.
         #     particles[i].xi_drag and .alpha_damp were set by ParticleSpec.build()
@@ -485,7 +487,9 @@ class System:
 
         # Update box in params after swell
         if self._config['periodic_x'] or self._config['periodic_y']:
-            set_periodic_box(params, self.Lx, self.Ly)
+            set_periodic_box(params, self.Lx, self.Ly,
+                              periodic_x=self._config['periodic_x'],
+                              periodic_y=self._config['periodic_y'])
 
         # 8. Wire driven particles from ParticleSpec.motion
         from src.simulation.tf_sim import set_driven
@@ -1298,7 +1302,9 @@ class System:
 
         # Update periodic box in params
         if self._config['periodic_x'] or self._config['periodic_y']:
-            set_periodic_box(self._params, self.Lx, self.Ly)
+            set_periodic_box(self._params, self.Lx, self.Ly,
+                              periodic_x=self._config['periodic_x'],
+                              periodic_y=self._config['periodic_y'])
 
         # Overwrite state tensors from checkpoint
         new_state = {}

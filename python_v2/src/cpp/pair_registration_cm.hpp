@@ -68,45 +68,90 @@ public:
 
     bool initialized = false;
 
+    // L2_full[i]: variable-length list of all peers j within skin radius.
+    // Used ONLY for cascade — when particle i triggers, all j in L2_full[i]
+    // get marked dirty for rebuild. L2 (the M2-closest) is derived from L2_full.
+    std::vector<std::vector<int>> L2_full;
+    double D_min;          // min over i of (R0[i] + r_c[i]) — uniform threshold base
+    double L2_full_skin;   // peers with cm_dist < (R0_i+R0_j+r_c_i+r_c_j)*L2_full_skin in L2_full
+
+    // Rebuild cadence (units = PHYSICS STEPS, not call count).
+    // step_counter is bumped by phys_steps_per_call on every update() call;
+    // phys_steps_per_call is set by the Python wrapper from cand_check_interval.
+    //
+    // Defaults are aligned: cascade_interval and L1L2_rebuild_interval are
+    // integer multiples of Q_refresh_interval, so cascades and full rebuilds
+    // always land on Q boundaries (no wasted Q-then-rebuild on adjacent steps).
+    //
+    //   - every Q_refresh_interval phys steps: full Q+C refresh for ALL particles
+    //   - every cascade_interval phys steps: also do trigger detect + cascade
+    //                                        L1/L2 surgical update
+    //   - every L1L2_rebuild_interval phys steps: full L1/L2 rebuild (subsumes Q)
+    int  Q_refresh_interval     = 30;
+    int  cascade_interval       = 150;  // = 5 × Q_refresh_interval (aligned)
+    int  L1L2_rebuild_interval  = 300;  // = 10 × Q (= 2 × cascade) (aligned)
+    int  phys_steps_per_call    = 10;   // matches default cand_check_interval
+    int  forced_rebuild_interval = 300; // legacy alias for L1L2_rebuild_interval
+    long step_counter = 0;              // accumulated physics steps
+
+    // Cascade scratch (P,) — reused across calls to avoid allocation
+    std::vector<uint8_t> peer_dirty;
+
     // Last-cycle diagnostics
     int diag_tier_L1 = 0, diag_tier_L2 = 0, diag_tier_Q = 0;
     int diag_affected = 0, diag_C_rows_patched = 0;
+    int diag_cascade_dirty = 0, diag_forced_rebuild = 0;
 
     PairRegistrationCM(int P_, int N_,
                        const double* R0_arr_, const double* r_c_per_p_,
                        double Lx_, double Ly_,
-                       int M1_=20, int M2_=10, int delta_=4,
+                       int M1_=20, int M2_=12, int delta_=4,
                        double L1_radius_scale_=1.5, double L2_radius_scale_=1.0,
                        double skin_=0.5,
                        bool periodic_x_=false, bool periodic_y_=false,
-                       double L1_trigger_frac_=0.5,
-                       double L2_trigger_frac_=0.1,
-                       double Q_trigger_frac_=0.25)
+                       double L1_trigger_frac_=0.25,
+                       double L2_trigger_frac_=0.10,
+                       double Q_trigger_frac_=0.25,
+                       int L1L2_rebuild_interval_=300,
+                       int Q_refresh_interval_=30,
+                       int cascade_interval_=150,
+                       int phys_steps_per_call_=10,
+                       double L2_full_skin_=1.5)
         : P(P_), N(N_), M1(M1_), M2(M2_), delta(delta_),
           Lx(Lx_), Ly(Ly_), periodic_x(periodic_x_), periodic_y(periodic_y_),
           L1_radius_scale(L1_radius_scale_), L2_radius_scale(L2_radius_scale_),
           skin(skin_),
           L1_trigger_frac(L1_trigger_frac_),
           L2_trigger_frac(L2_trigger_frac_),
-          Q_trigger_frac(Q_trigger_frac_)
+          Q_trigger_frac(Q_trigger_frac_),
+          Q_refresh_interval(Q_refresh_interval_),
+          cascade_interval(cascade_interval_),
+          L1L2_rebuild_interval(L1L2_rebuild_interval_),
+          phys_steps_per_call(phys_steps_per_call_),
+          forced_rebuild_interval(L1L2_rebuild_interval_),
+          L2_full_skin(L2_full_skin_)
     {
         E = 2*delta + 1;
         K = P * N;
         R0_arr.assign(R0_arr_, R0_arr_ + P);
         r_c_per_p.assign(r_c_per_p_, r_c_per_p_ + P);
         R0_max = *std::max_element(R0_arr.begin(), R0_arr.end());
-        // Trigger thresholds are now PER-PARTICLE in tier loop:
-        //   slip_L1 > L1_trigger_frac * R0_arr[i]
-        //   slip_L2 > L2_trigger_frac * R0_arr[i]
-        //   slip_Q  > Q_trigger_frac  * r_c_per_p[i]
-        // Below are population-level shadows used for diagnostics only.
+        // D_min = uniform trigger base (rcpgenerator-style: trigger fires when
+        // particle has consumed `frac * D_min` of its closing budget).
+        D_min = std::numeric_limits<double>::infinity();
+        for (int i = 0; i < P; ++i) {
+            double b = R0_arr[i] + r_c_per_p[i];
+            if (b < D_min) D_min = b;
+        }
         double r_c_min = *std::min_element(r_c_per_p.begin(), r_c_per_p.end());
         double R0_mean = 0.0;
         for (auto v : R0_arr) R0_mean += v;
         R0_mean /= P;
         Q_skin  = Q_trigger_frac  * r_c_min;
-        L2_skin = L2_trigger_frac * R0_mean;
-        L1_skin = L1_trigger_frac * R0_mean;
+        L2_skin = L2_trigger_frac * D_min;
+        L1_skin = L1_trigger_frac * D_min;
+        L2_full.assign(P, {});
+        peer_dirty.assign(P, 0);
 
         L1.assign(P*M1, EMPTY_NEIGHBOR);
         L2.assign(P*M2, EMPTY_NEIGHBOR);
@@ -151,7 +196,7 @@ public:
             Q_last_theta[i]    = theta[i];
         }
         for (int i = 0; i < P; ++i) {
-            rebuild_C_for_particle(i, x_all);
+            rebuild_C_for_particle(i, x_all, x_cm);
             C_patched[i] = cycle_id;
             ++diag_affected;
             diag_C_rows_patched += N;
@@ -168,42 +213,85 @@ public:
             cycle_id += 1;
             full_build(x_all, x_cm, theta);
             initialized = true;
+            step_counter += phys_steps_per_call;
             return;
         }
         cycle_id += 1;
+        step_counter += phys_steps_per_call;
         diag_tier_L1 = diag_tier_L2 = diag_tier_Q = 0;
         diag_affected = diag_C_rows_patched = 0;
+        diag_cascade_dirty = 0;
+        diag_forced_rebuild = 0;
 
-        std::vector<int> tier(P, 0);
-        for (int i = 0; i < P; ++i) {
-            double dxa = x_cm[2*i+0] - L1_last_x_cm[2*i+0];
-            double dya = x_cm[2*i+1] - L1_last_x_cm[2*i+1];
-            if (periodic_x) dxa -= Lx * std::round(dxa / Lx);
-            if (periodic_y) dya -= Ly * std::round(dya / Ly);
-            double slip_L1 = std::sqrt(dxa*dxa + dya*dya)
-                             + R0_arr[i] * std::abs(theta[i] - L1_last_theta[i]);
-            double dxb = x_cm[2*i+0] - L2_last_x_cm[2*i+0];
-            double dyb = x_cm[2*i+1] - L2_last_x_cm[2*i+1];
-            if (periodic_x) dxb -= Lx * std::round(dxb / Lx);
-            if (periodic_y) dyb -= Ly * std::round(dyb / Ly);
-            double slip_L2 = std::sqrt(dxb*dxb + dyb*dyb)
-                             + R0_arr[i] * std::abs(theta[i] - L2_last_theta[i]);
-            double th_L1 = L1_trigger_frac * R0_arr[i];
-            double th_L2 = L2_trigger_frac * R0_arr[i];
-            int t = 0;
-            if (slip_L2 > th_L2) t = 2;
-            if (slip_L1 > th_L1) t = 3;
-            tier[i] = t;
-            if (t == 3) ++diag_tier_L1;
-            else if (t == 2) ++diag_tier_L2;
+        // 4-layer cadence (units = PHYSICS STEPS):
+        //   - every call: no work (early return below if no Q this call)
+        //   - every Q_refresh_interval (~30): full Q+C refresh
+        //   - every cascade_interval (~120): also do trigger detect + cascade
+        //                                    L1/L2 surgical update
+        //   - every L1L2_rebuild_interval (~500): full L1/L2 rebuild
+        bool do_full_L1L2  = (L1L2_rebuild_interval > 0 &&
+                              (step_counter % L1L2_rebuild_interval) < phys_steps_per_call);
+        bool do_cascade    = do_full_L1L2 ||
+                             (cascade_interval > 0 &&
+                              (step_counter % cascade_interval) < phys_steps_per_call);
+        bool do_full_Q     = do_full_L1L2 || do_cascade ||
+                             (Q_refresh_interval > 0 &&
+                              (step_counter % Q_refresh_interval) < phys_steps_per_call);
+
+        // Layer 3: full L1/L2 rebuild every L1L2_rebuild_interval phys steps.
+        // Resets all baselines and refreshes everything. Safety net.
+        if (do_full_L1L2) {
+            full_build(x_all, x_cm, theta);
+            diag_forced_rebuild = 1;
+            diag_tier_L1 = P; diag_tier_Q = P;
+            diag_affected = P; diag_C_rows_patched = P*N;
+            return;
         }
 
-        // L1 first, then L2 (descending tier)
-        for (int i = 0; i < P; ++i) if (tier[i] == 3) L1_refresh_particle(i, x_all, x_cm, theta);
-        for (int i = 0; i < P; ++i) if (tier[i] == 2) L2_refresh_particle(i, x_all, x_cm, theta);
+        // Per-call (between Q refreshes): no work. Most calls fall through
+        // here. Q rebuild fires every Q_refresh_interval phys steps; cascade
+        // fires every cascade_interval (typically every 4 Q rebuilds).
+        if (!do_full_Q) {
+            return;
+        }
 
-        // Force-refresh Q on every particle (separate cycle so prior surgical
-        // Q refreshes don't suppress this pass)
+        // Cascade L1/L2 surgical update — only when do_cascade fires (every
+        // cascade_interval phys steps, e.g. every 4 Q rebuilds).
+        if (do_cascade) {
+            double th_L1 = L1_trigger_frac * D_min;
+            std::fill(peer_dirty.begin(), peer_dirty.end(), 0);
+            for (int i = 0; i < P; ++i) {
+                double dxa = x_cm[2*i+0] - L1_last_x_cm[2*i+0];
+                double dya = x_cm[2*i+1] - L1_last_x_cm[2*i+1];
+                if (periodic_x) dxa -= Lx * std::round(dxa / Lx);
+                if (periodic_y) dya -= Ly * std::round(dya / Ly);
+                double slip = std::sqrt(dxa*dxa + dya*dya)
+                              + R0_arr[i] * std::abs(theta[i] - L1_last_theta[i]);
+                if (slip > th_L1) {
+                    ++diag_tier_L1;
+                    peer_dirty[i] = 1;
+                    for (int j : L2_full[i]) peer_dirty[j] = 1;
+                }
+            }
+            for (int i = 0; i < P; ++i) {
+                if (!peer_dirty[i]) continue;
+                build_L2_for_particle(i, x_cm);
+                L1_refreshed[i] = cycle_id;
+                L2_refreshed[i] = cycle_id;
+                L1_last_x_cm[2*i+0] = x_cm[2*i+0];
+                L1_last_x_cm[2*i+1] = x_cm[2*i+1];
+                L1_last_theta[i]    = theta[i];
+                L2_last_x_cm[2*i+0] = x_cm[2*i+0];
+                L2_last_x_cm[2*i+1] = x_cm[2*i+1];
+                L2_last_theta[i]    = theta[i];
+                ++diag_cascade_dirty;
+            }
+            if (diag_cascade_dirty > 0) {
+                rebuild_inv_L2();
+            }
+        }
+
+        // Full Q+C refresh for ALL particles
         cycle_id += 1;
         for (int i = 0; i < P; ++i) {
             refresh_Q_for_particle(i, x_all, x_cm, theta);
@@ -212,7 +300,7 @@ public:
             Q_last_theta[i]    = theta[i];
         }
         for (int i = 0; i < P; ++i) {
-            rebuild_C_for_particle(i, x_all);
+            rebuild_C_for_particle(i, x_all, x_cm);
             C_patched[i] = cycle_id;
             diag_C_rows_patched += N;
         }
@@ -293,12 +381,23 @@ public:
                 if (Q_refreshed[i*M2 + s] == cycle_id) { touched = true; break; }
             }
             if (touched) {
-                rebuild_C_for_particle(i, x_all);
+                rebuild_C_for_particle(i, x_all, x_cm);
                 C_patched[i] = cycle_id;
                 diag_C_rows_patched += N;
                 ++diag_affected;
             }
         }
+    }
+
+    // Public entry point for forcing a from-scratch rebuild (delegates to the
+    // private full_build). Used by adaptive_swell after each compress step
+    // since affine CM rescaling invalidates L1/L2 ranking AND Q (n0,m0) basis.
+    void force_full_rebuild_public(const double* x_all, const double* x_cm,
+                                     const double* theta) {
+        cycle_id += 1;
+        full_build(x_all, x_cm, theta);
+        initialized = true;
+        step_counter = 0;   // reset cadence so subsequent calls start clean
     }
 
 private:
@@ -333,17 +432,21 @@ private:
     }
 
     // Closest-node-pair local search (port of sliding_candidacy.closest_node_pair_local)
+    // (sx, sy) = periodic shift to apply to xB nodes so they sit in the same
+    // image as xA. Caller computes once from CM-CM min-image. Open / hard
+    // boundaries pass (0, 0); periodic boundaries pass the wrap offset.
     void closest_node_pair_local(const double* x_all, int pA, int pB,
                                    int i_init, int j_init,
                                    int& i_out, int& j_out,
+                                   double sx = 0.0, double sy = 0.0,
                                    int max_iter = 15, int escape_steps = 3) {
         const double* xA = x_all + pA*N*2;
         const double* xB = x_all + pB*N*2;
         auto d2 = [&](int a, int b) {
             int aa = ((a % N) + N) % N;
             int bb = ((b % N) + N) % N;
-            double dx = xA[aa*2+0] - xB[bb*2+0];
-            double dy = xA[aa*2+1] - xB[bb*2+1];
+            double dx = xA[aa*2+0] - (xB[bb*2+0] + sx);
+            double dy = xA[aa*2+1] - (xB[bb*2+1] + sy);
             return dx*dx + dy*dy;
         };
 
@@ -415,9 +518,16 @@ private:
 
     void register_pair(int i, int slot, int j,
                         const double* x_all, const double* x_cm, const double* theta) {
-        double rx = x_cm[2*j+0] - x_cm[2*i+0];
-        double ry = x_cm[2*j+1] - x_cm[2*i+1];
+        // Raw CM-CM and min-image CM-CM. Their difference is the periodic
+        // shift to apply to xB nodes so they sit in the same image as xA.
+        // For open / hard boundaries (periodic_x or _y false) the shift on
+        // that axis is exactly zero — min_image is a no-op there.
+        double rx_raw = x_cm[2*j+0] - x_cm[2*i+0];
+        double ry_raw = x_cm[2*j+1] - x_cm[2*i+1];
+        double rx = rx_raw, ry = ry_raw;
         min_image(rx, ry);
+        double sx = rx - rx_raw;   // periodic shift for xB → image of xA
+        double sy = ry - ry_raw;
         double d = std::sqrt(rx*rx + ry*ry);
         if (d < 1e-12) {
             Q_n0[i*M2+slot] = -1;
@@ -428,7 +538,7 @@ private:
         int jA_hint = contact_facing_edge(i, nx, ny, theta);
         int jB_hint = contact_facing_edge(j, -nx, -ny, theta);
         int n0, m0;
-        closest_node_pair_local(x_all, i, j, jA_hint, jB_hint, n0, m0);
+        closest_node_pair_local(x_all, i, j, jA_hint, jB_hint, n0, m0, sx, sy);
         Q_n0[i*M2+slot] = n0;
         Q_m0[i*M2+slot] = m0;
         Q_cycle[i*M2+slot] = cycle_id;
@@ -438,12 +548,10 @@ private:
         // Score every j != i by NORMALIZED CM distance:
         //     score = cm_dist / (R0_i + R0_j + r_c_i + r_c_j)
         // L1 = smallest M1 scores; L2 = smallest M2 scores. No radius cutoff.
-        // Reason: raw distance biases against big-big pairs in bidisperse
-        // packings — a tightly-contacting big-big pair can have larger raw
-        // distance than a non-contacting small-small pair. Normalized score
-        // ranks by "tightness" (≤ 1 means perimeters can touch).
+        // L2_full = ALL j with score < L2_full_skin (peers within reach for cascade).
         std::vector<std::pair<double,int>> cands;
         cands.reserve(P);
+        L2_full[i].clear();
         for (int j = 0; j < P; ++j) {
             if (j == i) continue;
             double dx = x_cm[2*j+0] - x_cm[2*i+0];
@@ -451,7 +559,11 @@ private:
             min_image(dx, dy);
             double d = std::sqrt(dx*dx + dy*dy);
             double norm = R0_arr[i] + R0_arr[j] + r_c_per_p[i] + r_c_per_p[j];
-            cands.emplace_back(d / norm, j);
+            double score = d / norm;
+            cands.emplace_back(score, j);
+            if (score < L2_full_skin) {
+                L2_full[i].push_back(j);   // within skin → cascade-relevant
+            }
         }
         std::sort(cands.begin(), cands.end());
         for (int s = 0; s < M1; ++s) L1[i*M1+s] = EMPTY_NEIGHBOR;
@@ -473,16 +585,32 @@ private:
         }
     }
 
-    void rebuild_C_for_particle(int i, const double* x_all) {
-        // Collect L2 slots
+    void rebuild_C_for_particle(int i, const double* x_all,
+                                  const double* x_cm = nullptr) {
+        // Collect L2 slots and per-slot periodic shifts (xB → image of xA).
+        // For non-periodic axes the shift is zero (open / hard wall behavior).
+        // x_cm is optional only for backward compat — periodic correctness
+        // requires it. Falls back to (0,0) shift if not supplied.
         int n_slots = 0;
-        int slots_j[100], slots_n0[100], slots_m0[100];   // M2 ≤ 100
+        int slots_j[100], slots_n0[100], slots_m0[100];
+        double slots_sx[100], slots_sy[100];
         for (int s = 0; s < M2; ++s) {
             int j = L2[i*M2+s];
             if (j == EMPTY_NEIGHBOR) break;
             slots_j[n_slots]  = j;
             slots_n0[n_slots] = Q_n0[i*M2+s];
             slots_m0[n_slots] = Q_m0[i*M2+s];
+            if (x_cm != nullptr) {
+                double rx_raw = x_cm[2*j+0] - x_cm[2*i+0];
+                double ry_raw = x_cm[2*j+1] - x_cm[2*i+1];
+                double rx = rx_raw, ry = ry_raw;
+                min_image(rx, ry);
+                slots_sx[n_slots] = rx - rx_raw;
+                slots_sy[n_slots] = ry - ry_raw;
+            } else {
+                slots_sx[n_slots] = 0.0;
+                slots_sy[n_slots] = 0.0;
+            }
             ++n_slots;
         }
         const double* x_A = x_all + i*N*2;
@@ -504,8 +632,8 @@ private:
                 int p = ((n - n0) % N + N) % N;
                 int m = ((m0 - p) % N + N) % N;
                 const double* x_B = x_all + j*N*2;
-                double dx = xn0 - x_B[m*2+0];
-                double dy = xn1 - x_B[m*2+1];
+                double dx = xn0 - (x_B[m*2+0] + slots_sx[s]);
+                double dy = xn1 - (x_B[m*2+1] + slots_sy[s]);
                 double d2v = dx*dx + dy*dy;
                 if (d2v < best_d2) { best_d2 = d2v; best_j = j; best_m = m; }
             }
@@ -598,7 +726,7 @@ private:
             }
         }
         for (int i = 0; i < P; ++i) {
-            rebuild_C_for_particle(i, x_all);
+            rebuild_C_for_particle(i, x_all, x_cm);
             C_patched[i] = cycle_id;
         }
         for (int i = 0; i < P; ++i) {

@@ -460,6 +460,25 @@ def inter_capsule_forces_tf(x_all, CapCandidates, r_c_flat, k_c_flat, L0_flat,
     b0 = tf.reshape(tf.gather(x_src, cand_flat), [K, E, 2])
     b1 = tf.reshape(tf.gather(x_nxt, cand_flat), [K, E, 2])
 
+    # Periodic min-image: shift candidate edge endpoints (b0, b1) into the
+    # nearest image of the source-edge anchor a0. b0 and b1 are on the same
+    # particle (consecutive nodes), so they share the same shift — applying
+    # it preserves the candidate edge vector ab = b1 - b0 unchanged.
+    # box encoding: box[i] > 0 means periodic on axis i (length box[i]);
+    # box[i] == 0 means non-periodic on that axis (no shift). For non-periodic
+    # boundaries (open / hard walls / hopper) box=None and this block is skipped
+    # entirely, so there is zero overhead in the non-periodic path.
+    if box is not None:
+        a0_e = tf.expand_dims(a0, axis=1)                    # (K, 1, 2)
+        delta = b0 - a0_e                                    # (K, E, 2)
+        box_b = tf.reshape(box, [1, 1, 2])
+        # Per-axis: shift = -box * round(delta/box) when box>0, else 0
+        periodic_mask = tf.cast(box_b > 0, dtype)            # (1,1,2) ∈ {0,1}
+        box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+        shift = -periodic_mask * box_safe * tf.round(delta / box_safe)
+        b0 = b0 + shift
+        b1 = b1 + shift
+
     # Safe 0-indexed candidate node addresses (ghost → 0, clamped)
     cand_0safe = tf.maximum(cand, 1) - 1                 # (K, E) 0-indexed, ghost→0
     e_b        = cand_0safe % N
@@ -557,12 +576,17 @@ def inter_capsule_forces_tf(x_all, CapCandidates, r_c_flat, k_c_flat, L0_flat,
     f_a1_3d     = tf.roll(f_a1_src_3d, shift=1, axis=1)
     f_a1        = tf.reshape(f_a1_3d, [K, 2])
 
-    # Combined Newton-3rd scatter (4 scatters → 1)
-    all_indices  = tf.concat(scatter_indices_list,  axis=0)
-    all_contribs = tf.concat(scatter_contribs_list, axis=0)
+    # Newton-3rd scatter REMOVED — PRCM lists each contact pair in both rows
+    # (bidirectional), so the per-row reduce_sum on f_a0/f_a1 already captures
+    # forces on both sides. The earlier scatter was double-counting forces.
+    # NOTE: this assumes the candidacy provider lists pairs bidirectionally
+    # (PRCM does). Production CandidacyManager uses pA<pB convention which
+    # would now under-count — only PRCM is supported with this kernel.
+    # all_indices  = tf.concat(scatter_indices_list,  axis=0)
+    # all_contribs = tf.concat(scatter_contribs_list, axis=0)
 
     f_out = f_a0 + f_a1
-    f_out = tf.tensor_scatter_nd_add(f_out, all_indices, all_contribs)
+    # f_out = tf.tensor_scatter_nd_add(f_out, all_indices, all_contribs)
 
     return tf.reshape(f_out, [P, N, 2])
 
@@ -800,7 +824,8 @@ def make_prim_data(prim_list, dtype=None):
 
 
 @tf.function(jit_compile=True)
-def primitive_forces_tf(x_all, t, prim_data, r_c_flat, k_c_flat, L0_flat):
+def primitive_forces_tf(x_all, t, prim_data, r_c_flat, k_c_flat, L0_flat,
+                          box=None):
     """
     Nodal forces from rigid boundary primitives (line segments, polygons, arcs).
 
@@ -815,6 +840,11 @@ def primitive_forces_tf(x_all, t, prim_data, r_c_flat, k_c_flat, L0_flat):
     r_c_flat : (K,) DTYPE — per-edge capsule radius
     k_c_flat : (K,) DTYPE — per-edge contact stiffness
     L0_flat  : (K,) DTYPE — per-edge reference length
+    box      : (2,) DTYPE [Lx, Ly] or None — periodic box; per-axis encoding
+               (box[i] > 0 means periodic on axis i; 0 means non-periodic).
+               When box is None, this function behaves identically to the
+               non-periodic version (zero overhead — Python guard skips the
+               min-image block).
 
     Returns f : (P, N, 2) DTYPE
     """
@@ -902,6 +932,17 @@ def primitive_forces_tf(x_all, t, prim_data, r_c_flat, k_c_flat, L0_flat):
         p0_exp = seg_p0[None, :, :]        # (1, Ls, 2)
         ab_exp = ab_seg[None, :, :]        # (1, Ls, 2)
 
+        # Periodic min-image for source-particle Gauss point relative to each
+        # segment endpoint p0. Shifts xq into the nearest image of p0 per
+        # (k, s) pair. p0, p1 stay raw — particle's image moves to meet the wall.
+        if box is not None:
+            box_b   = tf.reshape(box, [1, 1, 2])
+            pmask   = tf.cast(box_b > 0, dtype)
+            box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+            delta_pre = xq_exp - p0_exp                                      # (K, Ls, 2)
+            shift_xq  = -pmask * box_safe * tf.round(delta_pre / box_safe)   # (K, Ls, 2)
+            xq_exp = xq_exp + shift_xq                                       # (K, Ls, 2)
+
         diff0  = xq_exp - p0_exp           # (K, Ls, 2)
         dot_n  = tf.reduce_sum(diff0 * ab_exp, axis=2)           # (K, Ls)
         t_raw  = dot_n / tf.maximum(ab2_seg[None, :], _tiny)     # (K, Ls) unclamped
@@ -980,7 +1021,16 @@ def primitive_forces_tf(x_all, t, prim_data, r_c_flat, k_c_flat, L0_flat):
 
         # ── Arcs ──────────────────────────────────────────────────────────────
         c_exp   = arc_c[None, :, :]       # (1, La, 2)
-        diff_a  = xq[:, None, :] - c_exp  # (K, La, 2)
+        xq_arc  = xq[:, None, :]          # (K, 1, 2)
+        # Periodic min-image: shift xq into nearest image of each arc center.
+        if box is not None:
+            box_b   = tf.reshape(box, [1, 1, 2])
+            pmask   = tf.cast(box_b > 0, dtype)
+            box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+            delta_pre = xq_arc - c_exp                                       # (K, La, 2)
+            shift_xq  = -pmask * box_safe * tf.round(delta_pre / box_safe)   # (K, La, 2)
+            xq_arc = xq_arc + shift_xq
+        diff_a  = xq_arc - c_exp          # (K, La, 2)
         dist_a  = tf.sqrt(tf.reduce_sum(diff_a * diff_a, axis=2))       # (K, La)
 
         # gap: convex (+1): dist - R; concave (-1): R - dist
@@ -1052,7 +1102,8 @@ def eval_forces_tf(state, CapCandidates, alpha_damp, g, params,
         box=params.get('box', None))
     if prim_data is not None:
         f_contact = f_contact + primitive_forces_tf(
-            x, t, prim_data, r_c_flat, k_c_flat, L0_flat)
+            x, t, prim_data, r_c_flat, k_c_flat, L0_flat,
+            box=params.get('box', None))
 
     # elastic + regularisation
     f_elastic = internal_forces_tf(x, params, g)
@@ -1125,7 +1176,8 @@ def step_full_tf(state, CapCandidates, dt, alpha_damp, g, params,
 
     if prim_data is not None:
         f_prim    = primitive_forces_tf(
-            state['x_all'], t, prim_data, r_c_flat, k_c_flat, L0_flat)
+            state['x_all'], t, prim_data, r_c_flat, k_c_flat, L0_flat,
+            box=box)
         f_contact = f_contact + f_prim
 
     new_state, metrics = step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=t)
@@ -1313,9 +1365,17 @@ def set_driven(params, indices, traj_rows, frozen=False):
     params['traj']         = tf.constant(tr)
 
 
-def set_periodic_box(params, Lx, Ly):
-    """Set the periodic box dimensions in params (activates periodic BC in forces)."""
-    params['box'] = tf.constant([NP_DTYPE(Lx), NP_DTYPE(Ly)])
+def set_periodic_box(params, Lx, Ly, periodic_x=True, periodic_y=True):
+    """Set the periodic box dimensions in params (activates periodic BC in forces).
+
+    For mixed-periodicity setups (e.g. periodic_x=True with hard top/bottom walls
+    in a Couette-like geometry), pass periodic_x / periodic_y individually.
+    Non-periodic axes are encoded as 0 in the box tensor; the force kernel
+    skips min-image on those axes (open / hard-wall behavior).
+    """
+    bx = NP_DTYPE(Lx) if periodic_x else NP_DTYPE(0.0)
+    by = NP_DTYPE(Ly) if periodic_y else NP_DTYPE(0.0)
+    params['box'] = tf.constant([bx, by])
 
 
 def state_to_numpy(state):
@@ -1404,8 +1464,15 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     n_cand_checks  = [0]
     n_cand_updates = [0]
 
+    # Managers can opt out of tf_sim's skin gating by exposing `always_update`
+    # = True (PRCM does this — it has its own per-particle internal triggers
+    # and cascade, so it must be called every candidacy_step to keep L1/L2
+    # current. Production CM keeps the skin gating to avoid expensive rebuilds
+    # when nothing has moved).
+    mgr_always_update = bool(getattr(mgr_cpp, 'always_update', False))
+
     def candidacy_step(x_cm, theta, x_all):
-        """Python callback: update C++ candidacy only when skin threshold exceeded.
+        """Python callback: update C++ candidacy.
 
         x_all is plumbed through for managers that need per-node positions
         (e.g., PRCM). Production CM ignores it.
@@ -1414,9 +1481,13 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
         xc = x_cm.numpy()
         th = theta.numpy()
         xa = x_all.numpy()
-        dx  = float(np.max(np.linalg.norm(xc - last_xc[0], axis=1)))
-        dth = float(np.max(np.abs(th - last_th[0])))
-        if (dx + R0_max * dth) > skin_thresh:
+        if mgr_always_update:
+            should_update = True
+        else:
+            dx  = float(np.max(np.linalg.norm(xc - last_xc[0], axis=1)))
+            dth = float(np.max(np.abs(th - last_th[0])))
+            should_update = (dx + R0_max * dth) > skin_thresh
+        if should_update:
             mgr_cpp.update(np.ascontiguousarray(xc, dtype=np.float64),
                            np.ascontiguousarray(th, dtype=np.float64),
                            x_all=np.ascontiguousarray(xa, dtype=np.float64))
