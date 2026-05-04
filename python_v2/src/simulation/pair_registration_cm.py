@@ -74,12 +74,23 @@ class PairRegistrationCM:
     """Drop-in replacement for production CandidacyManager. Same .update()
     + .CapCandidates surface so it works inside tf_sim.run_simulation_tf."""
 
+    # Tells tf_sim's candidacy_step to bypass its skin-gating and call
+    # update() on every poll. PRCM has its own internal per-particle triggers
+    # and cascade — it needs to be called regularly to keep L1/L2 current,
+    # otherwise long uninterrupted tf.while loops accumulate drift.
+    always_update = True
+
     def __init__(self, P, N, R0_arr, r_c_per_p, Lx, Ly,
-                 M1=20, M2=10, delta=4, skin=0.5,
+                 M1=20, M2=12, delta=4, skin=0.5,
                  L1_radius_scale=1.5, L2_radius_scale=1.0,
                  periodic_x=False, periodic_y=False,
-                 L1_trigger_frac=0.5, L2_trigger_frac=0.1,
+                 L1_trigger_frac=0.25, L2_trigger_frac=0.10,
                  Q_trigger_frac=0.25,
+                 L1L2_rebuild_interval=300,
+                 Q_refresh_interval=30,
+                 cascade_interval=150,
+                 phys_steps_per_call=10,
+                 L2_full_skin=1.5,
                  async_mode=False,
                  cand_log_dir=None):
         self._cpp = _ext.PairRegistrationCM(
@@ -94,14 +105,22 @@ class PairRegistrationCM:
             periodic_x=periodic_x, periodic_y=periodic_y,
             L1_trigger_frac=L1_trigger_frac,
             L2_trigger_frac=L2_trigger_frac,
-            Q_trigger_frac=Q_trigger_frac)
+            Q_trigger_frac=Q_trigger_frac,
+            L1L2_rebuild_interval=int(L1L2_rebuild_interval),
+            Q_refresh_interval=int(Q_refresh_interval),
+            cascade_interval=int(cascade_interval),
+            phys_steps_per_call=int(phys_steps_per_call),
+            L2_full_skin=float(L2_full_skin))
         # Mirror attributes the rest of the system reads
         self.P = P
         self.N = N
         self.E = self._cpp.E
         self.K = self._cpp.K
-        self.Lx = float(Lx)
-        self.Ly = float(Ly)
+        # Lx/Ly are stored on the C++ side via property forwarding (see below).
+        # Direct assignment to self.Lx/self.Ly propagates to the C++ object so
+        # min_image computations stay consistent with the current box.
+        self._Lx = float(Lx)   # private backing — property below mirrors to C++
+        self._Ly = float(Ly)
         self.skin = float(skin)
         self.R0 = float(np.mean(R0_arr))
         # CapCandidates buffer the force kernel reads — mirrors C++ side
@@ -115,6 +134,27 @@ class PairRegistrationCM:
         self._async_mode = bool(async_mode)
         self._worker_thread = None
         self._back_buffer = np.empty_like(self.CapCandidates)
+
+    # ── Lx/Ly properties: mirror Python writes to the C++ object so PRCM's
+    #    internal min_image() always uses the current box. Without this,
+    #    the C++ object retains the construction-time Lx/Ly indefinitely.
+    @property
+    def Lx(self):
+        return self._Lx
+
+    @Lx.setter
+    def Lx(self, value):
+        self._Lx = float(value)
+        self._cpp.Lx = float(value)
+
+    @property
+    def Ly(self):
+        return self._Ly
+
+    @Ly.setter
+    def Ly(self, value):
+        self._Ly = float(value)
+        self._cpp.Ly = float(value)
 
     # ── Same public surface as CandidacyManager ────────────────────────────
 
