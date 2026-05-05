@@ -1159,6 +1159,8 @@ class System:
             'theta': self._state['theta'].numpy(),
             't':     float(self._state['t']),
             'step':  int(self._state['step']),
+            'Lx':    float(self.Lx),    # box at frame time — needed for periodic
+            'Ly':    float(self.Ly),    # ghost-image rendering during swell
         }
 
     def eval_forces(self):
@@ -1806,22 +1808,32 @@ class System:
             ax_sim.set_title(title)
 
         # Particle patches — one primary + periodic ghost copies per particle.
-        # img_offsets: list of (dx, dy) shifts; primary is always (0, 0).
+        # Ghost-image offsets must use the PER-FRAME Lx/Ly (stored in snapshot),
+        # not self.Lx/Ly at make_movie call time. Otherwise during a swell run
+        # the offsets get baked from the FINAL (compressed) box and ghost copies
+        # land on top of primary particles in early-frame (large-box) frames.
+        # Frame-dict 'Lx'/'Ly' falls back to self.Lx/Ly for older snapshots.
         px = self._config.get('periodic_x', False)
         py = self._config.get('periodic_y', False)
-        dx_list = [-self.Lx, 0.0, self.Lx] if px else [0.0]
-        dy_list = [-self.Ly, 0.0, self.Ly] if py else [0.0]
-        img_offsets = [(dx, dy) for dx in dx_list for dy in dy_list]
+        # Number of slots per particle: 9 for fully periodic, 3 for one-axis, 1 for none.
+        n_dx = 3 if px else 1
+        n_dy = 3 if py else 1
+        n_imgs = n_dx * n_dy
+        # Initial slot order matches: dx_list × dy_list lexicographic
+        # primary index = (n_dx//2)*n_dy + (n_dy//2)  for periodic axes
 
-        # p_patches[pi][k] = MplPolygon for particle pi at offset img_offsets[k]
+        # p_patches[pi][k] = MplPolygon for particle pi at slot k. Slot order
+        # in the dx/dy index pair is lexicographic; primary slot has dx=dy=0.
+        # Actual offsets are recomputed per frame from snapshot Lx/Ly.
+        primary_slot = (n_dx // 2) * n_dy + (n_dy // 2)
         p_patches = []
         for pi in range(P):
             c   = self._particle_colors[pi] if pi < len(self._particle_colors) else 'cornflowerblue'
             row = []
-            for k, (dx, dy) in enumerate(img_offsets):
+            for k in range(n_imgs):
                 pat = MplPolygon(np.zeros((4, 2)), closed=True,
                                  fc=c, ec='k', lw=0.8, alpha=0.65, zorder=3,
-                                 visible=(dx == 0.0 and dy == 0.0))
+                                 visible=(k == primary_slot))
                 ax_sim.add_patch(pat)
                 row.append(pat)
             p_patches.append(row)
@@ -1903,11 +1915,20 @@ class System:
             cbd = cb[i] if i < len(cb) else {}
             t_now = fr['t']
 
+            # Per-frame Lx, Ly (falls back to self.Lx/Ly for legacy snapshots).
+            # Recompute periodic-ghost offsets from the FRAME's box, not the
+            # current self.Lx/Ly which is the post-swell (final) value.
+            Lx_fr = float(fr.get('Lx', self.Lx))
+            Ly_fr = float(fr.get('Ly', self.Ly))
+            dx_list = [-Lx_fr, 0.0, Lx_fr] if px else [0.0]
+            dy_list = [-Ly_fr, 0.0, Ly_fr] if py else [0.0]
+            frame_offsets = [(dx, dy) for dx in dx_list for dy in dy_list]
+
             # Particles — primary + periodic ghost copies
             for pi in range(P):
                 outline = self._capsule_outline_polygon(
                     fr['x_all'][pi], float(r_c_arr[pi]), n_arc)
-                for k, (odx, ody) in enumerate(img_offsets):
+                for k, (odx, ody) in enumerate(frame_offsets):
                     shifted = outline + np.array([odx, ody])
                     pat = p_patches[pi][k]
                     # Visibility: only draw copies that overlap the canvas
