@@ -1822,6 +1822,17 @@ class System:
         # Initial slot order matches: dx_list × dy_list lexicographic
         # primary index = (n_dx//2)*n_dy + (n_dy//2)  for periodic axes
 
+        # Box outline (dashed rectangle at [0,Lx]×[0,Ly]). Only drawn when at
+        # least one axis is periodic (otherwise box edges aren't physical).
+        # Updated per frame via fr['Lx'], fr['Ly'] for live-compression movies.
+        box_outline = None
+        if px or py:
+            from matplotlib.patches import Rectangle as MplRectangle
+            box_outline = MplRectangle((0.0, 0.0), self.Lx, self.Ly,
+                                         fill=False, ec='#888888', lw=1.0,
+                                         linestyle='--', zorder=2)
+            ax_sim.add_patch(box_outline)
+
         # p_patches[pi][k] = MplPolygon for particle pi at slot k. Slot order
         # in the dx/dy index pair is lexicographic; primary slot has dx=dy=0.
         # Actual offsets are recomputed per frame from snapshot Lx/Ly.
@@ -1924,6 +1935,11 @@ class System:
             dy_list = [-Ly_fr, 0.0, Ly_fr] if py else [0.0]
             frame_offsets = [(dx, dy) for dx in dx_list for dy in dy_list]
 
+            # Box outline tracks the current box dimensions
+            if box_outline is not None:
+                box_outline.set_width(Lx_fr)
+                box_outline.set_height(Ly_fr)
+
             # Particles — primary + periodic ghost copies
             for pi in range(P):
                 outline = self._capsule_outline_polygon(
@@ -1955,6 +1971,8 @@ class System:
             txt.set_text(cbd.get('text', ''))
 
             artists = all_p_patches + [a for (_, a, _, _) in obj_artists] + [txt]
+            if box_outline is not None:
+                artists.append(box_outline)
 
             # Time series
             if has_ts:
