@@ -369,6 +369,21 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
     x_cm_new  = x_cm  + v_cm_new * dt
     theta_new = theta + omega_new * dt
 
+    # ── continuous box-rate (additive affine compression / expansion) ─────────
+    # params['_box_rate_tf'] is (2,) per-axis strain rate [1/time]. Default 0.
+    # When non-zero, particle CMs scale per axis as x_cm ← x_cm·(1 + r·dt). Nodes
+    # follow rigidly because x_all is reconstructed below as (R·body + x_cm_new),
+    # so updating x_cm_new alone propagates correctly.
+    # Box-side bookkeeping (Lx, Ly, params['box']) is updated by the orchestration
+    # layer between sys.run() chunks; per-step box drift inside one chunk is
+    # small (<<1%) for typical rates and PRCM/min-image tolerate that.
+    # Wrapped in tf.cond so cost is ~zero when rate=0.
+    box_rate = params.get('_box_rate_tf', tf.zeros([2], dtype=DTYPE))
+    x_cm_new = tf.cond(
+        tf.reduce_any(tf.not_equal(box_rate, 0.0)),
+        lambda: x_cm_new + x_cm_new * box_rate[None, :] * dt,
+        lambda: x_cm_new)
+
     # ── deviatoric force → elastic deformation ────────────────────────────────
     # Frozen branch: f_dev = f_phys - F_phys/N  where F_phys = F_total (sum of ALL forces)
     N_f   = tf.cast(tf.shape(x)[1], DTYPE)
@@ -381,9 +396,14 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
     f_by  = -s * f_dev[:,:,0] + c * f_dev[:,:,1]
     f_body = tf.stack([f_bx, f_by], axis=2)                             # (P, N, 2)
 
-    accel_el  = f_body / m_node[:, None, None] - alpha_p[:, None, None] * u_dot
-    u_dot_el  = u_dot + accel_el * dt
-    u_el      = u     + u_dot_el * dt
+    # Semi-implicit Euler: u_dot_new = (u_dot + accel·dt) / (1 + α·dt)
+    # Equivalent to:  m·du/dt = f − α·m·u_dot_new  (damping evaluated at the new
+    # velocity instead of the old). Unconditionally stable for any α > 0,
+    # whereas the prior explicit form blew up at α·dt > 2.
+    accel_el  = f_body / m_node[:, None, None]
+    inv_factor = 1.0 / (1.0 + alpha_p[:, None, None] * dt)
+    u_dot_el  = (u_dot + accel_el * dt) * inv_factor
+    u_el      = u + u_dot_el * dt
 
     # Shape-freeze: lock elastic DOFs to frozen reference shape (not necessarily zero)
     if 'shape_frozen' in params:
