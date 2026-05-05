@@ -41,6 +41,7 @@ class System:
                  dt_factor=1.5,
                  alpha_damp=None,
                  beta_rb=0.0,
+                 box_rate=0.0,
                  E_candidates=32,
                  skin=1.0,
                  g=0.0,
@@ -66,6 +67,17 @@ class System:
         # the beta_rb property after init (see below) — assignment propagates
         # to params['_beta_rb_tf'] used by the TF integrator.
         self._beta_rb       = float(beta_rb)
+        # box_rate: per-axis affine compression/expansion rate [1/time], (rx, ry).
+        # When non-zero, particle CMs scale per axis as x_cm ← x_cm·(1+r·dt)
+        # each step inside the TF kernel (cost ≈ zero when zero, via tf.cond).
+        # Particle sizes (R0, r_c) are unchanged — only the box and inter-particle
+        # geometry shrink/grow. Box dimensions (sys.Lx/Ly, params['box'], PRCM box)
+        # are synced in Python between sys.run() chunks.
+        # Scalar input is broadcast to both axes; a (2,) sequence sets per-axis.
+        if isinstance(box_rate, (tuple, list, np.ndarray)):
+            self._box_rate = (float(box_rate[0]), float(box_rate[1]))
+        else:
+            self._box_rate = (float(box_rate), float(box_rate))
         self._E_candidates  = int(E_candidates)
         self._skin          = float(skin)
         self._g_val         = float(g)
@@ -167,6 +179,62 @@ class System:
             DTYPE = self._params['_beta_rb_tf'].dtype if '_beta_rb_tf' in self._params \
                     else self._params['_alpha_tf'].dtype
             self._params['_beta_rb_tf'] = tf.constant(NP_DTYPE(v), dtype=DTYPE)
+
+    @property
+    def box_rate(self):
+        """Per-axis affine compression / expansion rate [1/time], (rx, ry).
+
+        When non-zero, particle CMs scale each step inside the TF kernel as
+            x_cm ← x_cm · (1 + rate · dt)
+        and nodes follow rigidly. Particle sizes (R0, r_c) don't change — only
+        the box geometry. Setting this attribute updates params['_box_rate_tf']
+        live; the next sys.run() picks up the new rate.
+
+        Box dimensions (sys.Lx, sys.Ly, params['box'], PRCM box) are NOT
+        auto-updated inside the TF graph — call sys.sync_box() after each
+        sys.run() chunk to push the cumulative box change to Python and PRCM.
+        Per-step box drift inside one chunk is small (<<1%) for typical rates.
+        """
+        return self._box_rate
+
+    @box_rate.setter
+    def box_rate(self, value):
+        import tensorflow as tf
+        from src.simulation.tf_sim import NP_DTYPE
+        if isinstance(value, (tuple, list, np.ndarray)):
+            rx, ry = float(value[0]), float(value[1])
+        else:
+            rx = ry = float(value)
+        self._box_rate = (rx, ry)
+        if self._params is not None:
+            DTYPE = self._params.get('_box_rate_tf',
+                                       self._params['_alpha_tf']).dtype
+            self._params['_box_rate_tf'] = tf.constant(
+                [NP_DTYPE(rx), NP_DTYPE(ry)], dtype=DTYPE)
+
+    def sync_box(self, n_steps_elapsed):
+        """Update sys.Lx, sys.Ly, params['box'], and PRCM box from cumulative
+        box_rate * (n_steps_elapsed * dt). Call between sys.run() chunks during
+        a swell to keep Python-side bookkeeping consistent with the kernel-side
+        affine compression."""
+        import tensorflow as tf
+        from src.simulation.tf_sim import NP_DTYPE, set_periodic_box
+        rx, ry = self._box_rate
+        if rx == 0.0 and ry == 0.0:
+            return
+        dt = self._dt
+        scale_x = (1.0 + rx * dt) ** n_steps_elapsed
+        scale_y = (1.0 + ry * dt) ** n_steps_elapsed
+        self.Lx *= scale_x
+        self.Ly *= scale_y
+        if self._cm_mgr is not None:
+            self._cm_mgr.Lx = self.Lx
+            self._cm_mgr.Ly = self.Ly
+        if (self._config['periodic_x'] or self._config['periodic_y']) \
+                and self._params is not None:
+            set_periodic_box(self._params, self.Lx, self.Ly,
+                              periodic_x=self._config['periodic_x'],
+                              periodic_y=self._config['periodic_y'])
 
     @property
     def use_tf_function(self):
@@ -438,6 +506,8 @@ class System:
         params['_dt_tf']    = tf.constant(NP_DTYPE(dt_val))
         params['_alpha_tf'] = tf.constant(NP_DTYPE(alpha_val))
         params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb))   # rigid-body dissipation
+        params['_box_rate_tf'] = tf.constant(
+            [NP_DTYPE(self._box_rate[0]), NP_DTYPE(self._box_rate[1])])  # (2,) per-axis affine rate
         params['_g_tf']     = tf.constant(NP_DTYPE(self._g_val))   # stable ref for retrace fix
         params['_v_mem']    = tf.constant(NP_DTYPE(v_mem))
 
@@ -657,6 +727,8 @@ class System:
         params['_dt_tf']    = self._dt_tf
         params['_alpha_tf'] = self._alpha_tf
         params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb), dtype=DTYPE)
+        params['_box_rate_tf'] = tf.constant(
+            [NP_DTYPE(self._box_rate[0]), NP_DTYPE(self._box_rate[1])], dtype=DTYPE)
         params['_g_tf']     = self._g_tf
 
         # Per-particle alpha_damp and xi_drag (use particle attrs if set, else zeros)
@@ -1329,9 +1401,11 @@ class System:
         self._alpha_damp = float(ckpt['alpha_damp'])
         self._dt_tf      = tf.constant(NP_DTYPE(self._dt))
         self._alpha_tf   = tf.constant(NP_DTYPE(self._alpha_damp))
-        # beta_rb is a numerical knob (not saved); preserve current setting and
-        # re-push to params so the integrator picks it up
+        # beta_rb and box_rate are numerical knobs (not saved); preserve current
+        # settings and re-push to params so the integrator picks them up
         self._params['_beta_rb_tf'] = tf.constant(NP_DTYPE(self._beta_rb), dtype=DTYPE)
+        self._params['_box_rate_tf'] = tf.constant(
+            [NP_DTYPE(self._box_rate[0]), NP_DTYPE(self._box_rate[1])], dtype=DTYPE)
         # Keep dt_factor consistent with restored dt (dt_max is unchanged)
         if self._dt_max is not None and self._dt_max > 0:
             self._dt_factor = self._dt / self._dt_max
