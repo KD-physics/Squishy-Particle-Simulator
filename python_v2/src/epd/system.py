@@ -1672,7 +1672,14 @@ class System:
                 clipped = tf.constant(0, dtype=tf.int32)
                 for _ in tf.range(n_steps):
                     f = force_fn(x_var, caps)
-                    grad = -f
+                    # Zero-mean gradient: subtract per-axis mean over all nodes.
+                    # k_reg has non-zero net per-particle (it's projected out of the
+                    # physics RB integrator); without removing it, ADAM's m
+                    # accumulates a translation bias that drifts the whole system
+                    # across periodic boundaries — wasted optimizer effort in a
+                    # direction that doesn't reduce U.
+                    grad_raw = -f
+                    grad = grad_raw - tf.reduce_mean(grad_raw, axis=(0, 1), keepdims=True)
                     t_var.assign_add(1)
                     m_var.assign(beta1_t * m_var + (one - beta1_t) * grad)
                     v_varad.assign(beta2_t * v_varad + (one - beta2_t) * grad * grad)
@@ -1870,7 +1877,10 @@ class System:
             def _inner_chunk(caps, n_steps):
                 clipped = tf.constant(0, dtype=tf.int32)
                 for _ in tf.range(n_steps):
-                    f = force_fn(x_var, caps)
+                    f_raw = force_fn(x_var, caps)
+                    # Zero-mean force (same reason as ADAM — kill translation drift
+                    # from k_reg / numerical accumulation in periodic systems).
+                    f = f_raw - tf.reduce_mean(f_raw, axis=(0, 1), keepdims=True)
                     Pn = tf.reduce_sum(f * v_var)
                     # F3: mix v toward F̂
                     v_norm = tf.sqrt(tf.reduce_sum(v_var * v_var) + tiny)
