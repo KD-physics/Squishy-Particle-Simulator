@@ -1196,6 +1196,153 @@ class System:
             prim_data     = self._prim_data,
         )
 
+    # ── Phase 8: ADAM / saddle-aware energy minimization (additive only) ──────
+
+    def make_position_variable(self):
+        """
+        Convenience: return a tf.Variable initialized from the current x_all.
+        Used as the optimizable parameter for tf.keras.optimizers (ADAM, etc.).
+        """
+        import tensorflow as tf
+        return tf.Variable(self._state['x_all'], trainable=True)
+
+    def eval_forces_at(self, x_all):
+        """
+        Conservative force evaluated at an external position tensor (or Variable).
+        Pure-TF; safe to call inside @tf.function.
+
+        Sums internal elastic + line tension + inter-capsule contact + primitive
+        contact + drag (drag is zero when xi_drag_per_p = 0). Uses the current
+        CapCandidates and prim_data — caller is responsible for refreshing the
+        candidacy via tf.py_function(self._cm_mgr.update, ...) inside the loop.
+
+        Returns f_total : (P, N, 2) tensor, gradient-flowing w.r.t. x_all.
+        """
+        import tensorflow as tf
+        from src.simulation.tf_sim import (
+            internal_forces_tf, k_reg_forces_tf,
+            inter_capsule_forces_tf, primitive_forces_tf,
+        )
+        params = self._params
+        N_nodes = x_all.shape[1]
+        r_c_flat = tf.repeat(params['r_c_per_p'], N_nodes)
+        k_c_flat = tf.repeat(params['k_c_per_p'], N_nodes)
+        L0_flat  = tf.repeat(params['L0'],        N_nodes)
+        box      = params.get('box', None)
+
+        caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+        f_contact = inter_capsule_forces_tf(
+            x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+        if self._prim_data is not None:
+            t0 = tf.constant(0.0, dtype=x_all.dtype)
+            f_contact = f_contact + primitive_forces_tf(
+                x_all, t0, self._prim_data,
+                r_c_flat, k_c_flat, L0_flat, box=box)
+
+        f_elastic = internal_forces_tf(x_all, params, self._g_tf)
+        f_reg     = k_reg_forces_tf(x_all, params)
+        return f_elastic + f_reg + f_contact
+
+    def eval_potential_energy(self, x_all=None):
+        """
+        Total potential energy U(x). Defaults to current state.
+
+        Used as a diagnostic between optimizer chunks (NOT inside the hot loop).
+        Returns Python float.
+        """
+        import tensorflow as tf
+        from src.simulation.tf_sim import eval_potential_energy_tf
+        if x_all is None:
+            x_all = self._state['x_all']
+        caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+        U = eval_potential_energy_tf(x_all, self._params, caps,
+                                      prim_data=self._prim_data)
+        return float(U.numpy())
+
+    def eval_potential_energy_components(self, x_all=None):
+        """
+        Per-term potential energy breakdown at x_all (defaults to current state).
+
+        Returns
+        -------
+        dict with keys: 'edge', 'bend', 'area', 'lt', 'cc', 'prim', 'total'
+
+          edge : edge-spring (perimeter elasticity)
+          bend : bending energy at each node hinge
+          area : (K_area/(2 A0)) (A − A0)² — bulk-pressure floor at fixed φ
+          lt   : line tension (γ_lt × perimeter); minimum at circle
+          cc   : inter-capsule contact penalty (PRCM bidirectional half-counted)
+          prim : primitive-wall contact penalty (segments + arcs)
+          total: sum of the above
+
+        Useful for diagnosing where ADAM's PE drop comes from: line tension and
+        bending fall when shape modes smooth out; cc falls when contacts
+        rearrange; area is largely fixed by box geometry at fixed φ.
+        """
+        import tensorflow as tf
+        from src.simulation.tf_sim import eval_potential_energy_components_tf
+        if x_all is None:
+            x_all = self._state['x_all']
+        caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+        comp = eval_potential_energy_components_tf(
+            x_all, self._params, caps, prim_data=self._prim_data).numpy()
+        return {
+            'edge':  float(comp[0]),
+            'bend':  float(comp[1]),
+            'area':  float(comp[2]),
+            'lt':    float(comp[3]),
+            'cc':    float(comp[4]),
+            'prim':  float(comp[5]),
+            'total': float(comp.sum()),
+        }
+
+    def sync_from_var(self, x_all_var):
+        """
+        Pull a tf.Variable's values back into the live System state after an
+        external optimizer (ADAM, etc.) has driven it. Recomputes x_cm,
+        re-derives the elastic displacement u in the body frame at theta=0,
+        zeros velocities, applies periodic wrap.
+
+        The integrator decomposition is x_all = x_cm + R(theta)·(X_ref + u).
+        We pick theta=0 (rotation absorbed into u), so u = x_all - x_cm - X_ref.
+        This gives a consistent state that the kernel can step from without
+        the reconstruction overwriting the new x_all.
+
+        Call once after the optimizer loop completes. The System is then ready
+        for standard physics dynamics from the new configuration.
+        """
+        import tensorflow as tf
+        dtype = self._state['x_all'].dtype
+        x_new    = tf.constant(x_all_var.numpy(), dtype=dtype)
+        x_cm_new = tf.reduce_mean(x_new, axis=1)                       # (P, 2)
+        X_ref    = self._state['X_ref']                                 # (P, N, 2)
+
+        theta_zero = tf.zeros_like(self._state['theta'])
+        u_new      = (x_new - x_cm_new[:, None, :]) - X_ref            # (P, N, 2)
+
+        zeros_PN2 = tf.zeros_like(self._state['u_dot'])
+        zeros_P   = tf.zeros_like(self._state['omega'])
+        zeros_P2  = tf.zeros_like(self._state['v_cm'])
+        self._state = {
+            **self._state,
+            'x_all': x_new,
+            'x_cm':  x_cm_new,
+            'theta': theta_zero,
+            'u':     u_new,
+            'v_cm':  zeros_P2,
+            'omega': zeros_P,
+            'u_dot': zeros_PN2,
+        }
+        # Periodic wrap (preserves x_cm in [0,L), shifts nodes consistently)
+        self._state = self._wrap_state(self._state)
+        # Refresh CapCandidates so eval_potential_energy / eval_forces / run all
+        # see candidate pairs aligned to the NEW positions. Without this, the
+        # PRCM list is whatever the last physics or ADAM call left it as.
+        self._cm_mgr.update(self._state['x_cm'].numpy(),
+                            self._state['theta'].numpy(),
+                            x_all=self._state['x_all'].numpy())
+        return self
+
     # ── batch run ─────────────────────────────────────────────────────────────
 
     def run(self, N, sample_every=None, callback=None, record_initial=True,
