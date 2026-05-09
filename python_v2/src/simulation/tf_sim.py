@@ -1178,6 +1178,513 @@ def eval_forces_tf(state, CapCandidates, alpha_damp, g, params,
     }
 
 
+# ── potential energy evaluation (Phase 8 — additive, no force-kernel changes) ─
+
+@tf.function(jit_compile=True)
+def eval_potential_energy_tf(x_all, params, CapCandidates, prim_data=None):
+    """
+    Total potential energy U(x) of the configuration. Pure TF; tape-able.
+
+    Energy terms (each consistent by integration with the corresponding force
+    in internal_forces_tf / inter_capsule_forces_tf / primitive_forces_tf):
+
+      U_edge   = Σ_(p,e)  (El_t/(2·L0)) · (L − L0)²
+      U_bend   = Σ_(p,n)  (EI/(2·L0))   · (θ − θ0)²
+      U_area   = Σ_p      (K_area/(2·A0)) · (A − A0)²
+      U_lt     = Σ_(p,e)  γ_lt · L                       (line tension; emulsion)
+      U_cc     = ½ · Σ_rows  Σ_gp  ½·k_c·gap²·L0·w_g     (PRCM bidirectional → ½)
+      U_prim   = Σ_(K,Ls/La) Σ_gp  ½·k_c·gap²·L0·w_g     (segments, arcs)
+
+    Drag is dissipative — not part of U. Regularisation is a pseudo-force
+    (no scalar potential) — also excluded.
+
+    Note: U is a scalar diagnostic, not the strict integrated potential of
+    eval_forces_tf. The area-pressure force uses reference-edge weights
+    (P_s · L0 · n_node), whereas the exact variational gradient of A uses
+    current edge geometry. Median |dU/dx − F_analytic|/|F| ≈ 4% on deformed
+    polygons. Use forces (eval_forces_at) for optimization gradients; use U
+    only as an energy-landscape proxy.
+
+    Parameters
+    ----------
+    x_all         : (P, N, 2) DTYPE — node positions to evaluate U at
+    params        : dict — same params dict the kernel uses
+    CapCandidates : (K, E) int32 — same as force path
+    prim_data     : dict from make_prim_data() or None
+
+    Returns
+    -------
+    U : scalar DTYPE — total potential energy
+    """
+    dtype = x_all.dtype
+    P = x_all.shape[0]
+    N = x_all.shape[1]
+    K = P * N
+
+    _half = tf.constant(0.5, dtype=dtype)
+    _zero = tf.constant(0.0, dtype=dtype)
+    _one  = tf.constant(1.0, dtype=dtype)
+    _tiny = tf.constant(1e-30, dtype=dtype)
+
+    # Edge geometry
+    t_hat, n_hat, L = _edge_tangents_normals(x_all)        # (P,N,2),(P,N,2),(P,N)
+    L0     = params['L0']                                   # (P,)
+    A0     = params['A0']
+    K_area = params['K_area']
+    El_t   = params['El_t']
+    EI     = params['EI']
+    theta0 = params['theta0']                                # (P, N)
+    gamma_lt = params['gamma_lt']                            # (P,)
+
+    # 1) Edge-spring energy — U = (El_t / (2 L0)) · (L - L0)^2
+    dL = L - L0[:, None]                                    # (P, N)
+    U_edge = tf.reduce_sum((El_t / (2.0 * L0))[:, None] * dL * dL)
+
+    # 2) Bending energy — U = (EI / (2 L0)) · (θ - θ0)^2
+    t_prev = tf.roll(t_hat, shift=1, axis=1)
+    cross  = t_prev[:, :, 0]*t_hat[:, :, 1] - t_prev[:, :, 1]*t_hat[:, :, 0]
+    dot_   = t_prev[:, :, 0]*t_hat[:, :, 0] + t_prev[:, :, 1]*t_hat[:, :, 1]
+    theta_cur = tf.math.atan2(cross, dot_)                  # (P, N)
+    dtheta = theta_cur - theta0
+    U_bend = tf.reduce_sum((EI / (2.0 * L0))[:, None] * dtheta * dtheta)
+
+    # 3) Area energy — U = (K_area / (2 A0)) · (A - A0)^2
+    A  = tf.abs(_shoelace_area(x_all))                      # (P,)
+    dA = A - A0
+    U_area = tf.reduce_sum(K_area / (2.0 * A0) * dA * dA)
+
+    # 4) Line tension — U = γ_lt · perimeter
+    U_lt = tf.reduce_sum(gamma_lt * tf.reduce_sum(L, axis=1))
+
+    # 5) Inter-capsule contact — mirror inter_capsule_forces_tf geometry exactly
+    r_c_flat = tf.repeat(params['r_c_per_p'], N)            # (K,)
+    k_c_flat = tf.repeat(params['k_c_per_p'], N)            # (K,)
+    L0_flat  = tf.repeat(L0,                  N)            # (K,)
+    box      = params.get('box', None)
+    E_       = CapCandidates.shape[1]
+
+    ghost  = tf.fill([1, 2], tf.constant(1e9, dtype=dtype))
+    x_flat      = tf.reshape(x_all, [K, 2])
+    x_flat_next = tf.reshape(tf.roll(x_all, shift=-1, axis=1), [K, 2])
+    x_src  = tf.concat([ghost, x_flat],      axis=0)
+    x_nxt  = tf.concat([ghost, x_flat_next], axis=0)
+    a0 = x_flat
+    a1 = x_flat_next
+
+    cand      = CapCandidates
+    cand_flat = tf.reshape(cand, [K * E_])
+    b0 = tf.reshape(tf.gather(x_src, cand_flat), [K, E_, 2])
+    b1 = tf.reshape(tf.gather(x_nxt, cand_flat), [K, E_, 2])
+
+    if box is not None:
+        a0_e = tf.expand_dims(a0, axis=1)
+        delta_b0 = b0 - a0_e
+        box_b = tf.reshape(box, [1, 1, 2])
+        pmask = tf.cast(box_b > 0, dtype)
+        box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+        shift = -pmask * box_safe * tf.round(delta_b0 / box_safe)
+        b0 = b0 + shift
+        b1 = b1 + shift
+
+    cand_0safe = tf.maximum(cand, 1) - 1
+    active = tf.cast(tf.not_equal(cand, 0), dtype)          # (K, E)
+    ab     = b1 - b0
+    ab2    = tf.reduce_sum(ab * ab, axis=2)                 # (K, E)
+
+    sg0 = tf.constant((1.0 - 1.0 / 3.0**0.5) / 2.0, dtype=dtype)
+    sg1 = tf.constant((1.0 + 1.0 / 3.0**0.5) / 2.0, dtype=dtype)
+    wg  = tf.constant(0.5, dtype=dtype)
+
+    r_c_cand  = tf.reshape(tf.gather(r_c_flat, tf.reshape(cand_0safe, [-1])),
+                           [K, E_])
+    contact_r = r_c_flat[:, None] + r_c_cand                # (K, E)
+
+    U_cc = _zero
+    for sg in [sg0, sg1]:
+        w0 = _one - sg
+        xq = w0 * a0 + sg * a1                              # (K, 2)
+        xq_e = xq[:, None, :]
+        diff_b0 = xq_e - b0
+        if box is not None:
+            box_b = tf.reshape(box, [1, 1, 2])
+            pmask = tf.cast(box_b > 0, dtype)
+            box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+            diff_b0 = diff_b0 - pmask * box_safe * tf.round(diff_b0 / box_safe)
+        dot_num = tf.reduce_sum(diff_b0 * ab, axis=2)
+        t_B = tf.clip_by_value(
+            tf.where(ab2 > _tiny,
+                     dot_num / tf.maximum(ab2, _tiny),
+                     tf.fill([K, E_], _half)),
+            _zero, _one)
+        diff = diff_b0 - t_B[:, :, None] * ab
+        d    = tf.sqrt(tf.reduce_sum(diff * diff, axis=2))
+        gap  = d - contact_r
+        in_contact = tf.cast(gap < _zero, dtype) * active
+        # Per-Gauss-point contact spring energy: ½·k_c·gap²·L0·w_g
+        U_cc = U_cc + tf.reduce_sum(
+            _half * k_c_flat[:, None] * gap * gap *
+            L0_flat[:, None] * wg * in_contact)
+
+    # PRCM lists each contact pair bidirectionally (row a → b AND row b → a),
+    # so the sum above double-counts every pair → halve.
+    U_cc = _half * U_cc
+
+    # 6) Primitive contact energy (segments + arcs)
+    U_prim = _zero
+    if prim_data is not None:
+        a0_flat = tf.reshape(x_all, [K, 2])
+        a1_flat = tf.reshape(tf.roll(x_all, shift=-1, axis=1), [K, 2])
+
+        seg_omega = prim_data['seg_omega']
+        seg_r_ref = prim_data['seg_r_ref']
+        # PE is t-independent of wall motion (for energy diagnostics we evaluate
+        # at t=0 — same simplification used when prim_data is static which is
+        # the Phase 8 use case). For walls with seg_omega=0, seg_vel=0, this is
+        # exact at all t.
+        t_eval = tf.constant(0.0, dtype=dtype)
+        cos_s = tf.cos(seg_omega * t_eval)
+        sin_s = tf.sin(seg_omega * t_eval)
+        def _rotate_pts(pts_ref):
+            dp = pts_ref - seg_r_ref
+            rot_x = cos_s * dp[:, 0] - sin_s * dp[:, 1]
+            rot_y = sin_s * dp[:, 0] + cos_s * dp[:, 1]
+            return seg_r_ref + tf.stack([rot_x, rot_y], axis=1) + \
+                   prim_data['seg_vel'] * t_eval
+        seg_p0 = _rotate_pts(prim_data['seg_p0'])
+        seg_p1 = _rotate_pts(prim_data['seg_p1'])
+        dn = prim_data['seg_n']
+        seg_n = tf.stack([cos_s * dn[:, 0] - sin_s * dn[:, 1],
+                          sin_s * dn[:, 0] + cos_s * dn[:, 1]], axis=1)
+
+        ab_seg  = seg_p1 - seg_p0
+        ab2_seg = tf.reduce_sum(ab_seg * ab_seg, axis=1)
+
+        arc_omega = prim_data['arc_omega']
+        arc_r_ref = prim_data['arc_r_ref']
+        cos_a = tf.cos(arc_omega * t_eval)
+        sin_a = tf.sin(arc_omega * t_eval)
+        dc = prim_data['arc_c'] - arc_r_ref
+        arc_c = arc_r_ref + tf.stack([cos_a * dc[:, 0] - sin_a * dc[:, 1],
+                                       sin_a * dc[:, 0] + cos_a * dc[:, 1]],
+                                      axis=1) + prim_data['arc_vel'] * t_eval
+
+        Ng = prim_data['grp_seg'].shape[0]
+        Ms = prim_data['grp_seg'].shape[1]
+        Ls = seg_p0.shape[0]
+
+        for sg in [sg0, sg1]:
+            w0 = _one - sg
+            xq = w0 * a0_flat + sg * a1_flat                  # (K, 2)
+
+            # Segments
+            xq_e = xq[:, None, :]
+            p0_e = seg_p0[None, :, :]
+            ab_e = ab_seg[None, :, :]
+            if box is not None:
+                box_b = tf.reshape(box, [1, 1, 2])
+                pmask = tf.cast(box_b > 0, dtype)
+                box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+                delta_pre = xq_e - p0_e
+                xq_e = xq_e - pmask * box_safe * tf.round(delta_pre / box_safe)
+            diff0 = xq_e - p0_e
+            dot_n = tf.reduce_sum(diff0 * ab_e, axis=2)
+            t_raw = dot_n / tf.maximum(ab2_seg[None, :], _tiny)
+            t_seg = tf.clip_by_value(t_raw, _zero, _one)
+            t_in_seg = tf.cast((t_raw >= _zero) & (t_raw <= _one), dtype)
+            is_standalone = tf.cast(prim_data['seg_grp_flat_idx'] < 0, dtype)[None, :]
+            seg_in_seg = _one - is_standalone + is_standalone * t_in_seg
+
+            cp_seg = p0_e + t_seg[:, :, None] * ab_e
+            diff_s = xq_e - cp_seg
+            n_e    = seg_n[None, :, :]
+            gap_s  = tf.reduce_sum(diff_s * n_e, axis=2)
+
+            # Polygon-group active-face mask (argmax over gap within each polygon)
+            seg_active = tf.ones([K, Ls], dtype=dtype)
+            if Ng > 0:
+                _INF = tf.constant(1e30, dtype=dtype)
+                grp_seg_flat = tf.reshape(prim_data['grp_seg'], [-1])
+                grp_seg_safe = tf.maximum(grp_seg_flat, 0)
+                gap_grp = tf.gather(gap_s, grp_seg_safe, axis=1)
+                gap_grp = tf.reshape(gap_grp, [K, Ng, Ms])
+                mask_e  = prim_data['grp_mask'][None, :, :]
+                gap_grp_masked = tf.where(mask_e, gap_grp,
+                                          tf.fill(tf.shape(gap_grp), -_INF))
+                argmax_poly = tf.argmax(gap_grp_masked, axis=2,
+                                        output_type=tf.int32)
+                active_slots = (tf.one_hot(argmax_poly, Ms, dtype=dtype)
+                                * tf.cast(mask_e, dtype))
+                active_flat  = tf.reshape(active_slots, [K, Ng * Ms])
+                seg_grp_idx  = prim_data['seg_grp_flat_idx']
+                is_poly      = tf.cast(seg_grp_idx >= 0, dtype)
+                grp_safe     = tf.maximum(seg_grp_idx, 0)
+                poly_act     = tf.gather(active_flat, grp_safe, axis=1)
+                seg_active = (_one - is_poly[None, :]) + is_poly[None, :] * poly_act
+
+            r_c_eff = r_c_flat[:, None] + prim_data['seg_r_c'][None, :]
+            gap_eff = gap_s - r_c_eff
+            in_c    = tf.cast(gap_eff < _zero, dtype) * seg_active * seg_in_seg
+            k_eff   = k_c_flat[:, None] * prim_data['seg_k_pen'][None, :]
+            U_prim = U_prim + tf.reduce_sum(
+                _half * k_eff * gap_eff * gap_eff *
+                L0_flat[:, None] * wg * in_c)
+
+            # Arcs
+            xq_arc = xq[:, None, :]
+            c_e = arc_c[None, :, :]
+            if box is not None:
+                box_b = tf.reshape(box, [1, 1, 2])
+                pmask = tf.cast(box_b > 0, dtype)
+                box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+                delta_pre = xq_arc - c_e
+                xq_arc = xq_arc - pmask * box_safe * tf.round(delta_pre / box_safe)
+            diff_a = xq_arc - c_e
+            dist_a = tf.sqrt(tf.reduce_sum(diff_a * diff_a, axis=2))
+            arc_sgn = prim_data['arc_sgn']
+            gap_a   = arc_sgn[None, :] * (dist_a - prim_data['arc_R'][None, :])
+            r_c_a   = r_c_flat[:, None] + prim_data['arc_r_c'][None, :]
+            gap_a_eff = gap_a - r_c_a
+            in_ca   = tf.cast(gap_a_eff < _zero, dtype)
+            k_eff_a = k_c_flat[:, None] * prim_data['arc_k_pen'][None, :]
+            U_prim = U_prim + tf.reduce_sum(
+                _half * k_eff_a * gap_a_eff * gap_a_eff *
+                L0_flat[:, None] * wg * in_ca)
+
+    return U_edge + U_bend + U_area + U_lt + U_cc + U_prim
+
+
+@tf.function(jit_compile=True)
+def eval_potential_energy_components_tf(x_all, params, CapCandidates, prim_data=None):
+    """
+    Same as eval_potential_energy_tf but returns the 6 components separately
+    as a stacked tensor [U_edge, U_bend, U_area, U_lt, U_cc, U_prim]. Used to
+    diagnose where ADAM's PE drop comes from (line tension + bending +
+    contact rearrangement vs irreducible area floor).
+
+    Returns
+    -------
+    U_components : (6,) DTYPE tensor — [edge, bend, area, lt, cc, prim]
+    """
+    dtype = x_all.dtype
+    P = x_all.shape[0]
+    N = x_all.shape[1]
+    K = P * N
+
+    _half = tf.constant(0.5, dtype=dtype)
+    _zero = tf.constant(0.0, dtype=dtype)
+    _one  = tf.constant(1.0, dtype=dtype)
+    _tiny = tf.constant(1e-30, dtype=dtype)
+
+    t_hat, n_hat, L = _edge_tangents_normals(x_all)
+    L0     = params['L0']
+    A0     = params['A0']
+    K_area = params['K_area']
+    El_t   = params['El_t']
+    EI     = params['EI']
+    theta0 = params['theta0']
+    gamma_lt = params['gamma_lt']
+
+    dL = L - L0[:, None]
+    U_edge = tf.reduce_sum((El_t / (2.0 * L0))[:, None] * dL * dL)
+
+    t_prev = tf.roll(t_hat, shift=1, axis=1)
+    cross  = t_prev[:, :, 0]*t_hat[:, :, 1] - t_prev[:, :, 1]*t_hat[:, :, 0]
+    dot_   = t_prev[:, :, 0]*t_hat[:, :, 0] + t_prev[:, :, 1]*t_hat[:, :, 1]
+    theta_cur = tf.math.atan2(cross, dot_)
+    dtheta = theta_cur - theta0
+    U_bend = tf.reduce_sum((EI / (2.0 * L0))[:, None] * dtheta * dtheta)
+
+    A  = tf.abs(_shoelace_area(x_all))
+    dA = A - A0
+    U_area = tf.reduce_sum(K_area / (2.0 * A0) * dA * dA)
+
+    U_lt = tf.reduce_sum(gamma_lt * tf.reduce_sum(L, axis=1))
+
+    # Inter-capsule contact (mirror inter_capsule_forces_tf geometry)
+    r_c_flat = tf.repeat(params['r_c_per_p'], N)
+    k_c_flat = tf.repeat(params['k_c_per_p'], N)
+    L0_flat  = tf.repeat(L0,                  N)
+    box      = params.get('box', None)
+    E_       = CapCandidates.shape[1]
+
+    ghost  = tf.fill([1, 2], tf.constant(1e9, dtype=dtype))
+    x_flat      = tf.reshape(x_all, [K, 2])
+    x_flat_next = tf.reshape(tf.roll(x_all, shift=-1, axis=1), [K, 2])
+    x_src  = tf.concat([ghost, x_flat],      axis=0)
+    x_nxt  = tf.concat([ghost, x_flat_next], axis=0)
+    a0 = x_flat
+    a1 = x_flat_next
+
+    cand      = CapCandidates
+    cand_flat = tf.reshape(cand, [K * E_])
+    b0 = tf.reshape(tf.gather(x_src, cand_flat), [K, E_, 2])
+    b1 = tf.reshape(tf.gather(x_nxt, cand_flat), [K, E_, 2])
+
+    if box is not None:
+        a0_e = tf.expand_dims(a0, axis=1)
+        delta_b0 = b0 - a0_e
+        box_b = tf.reshape(box, [1, 1, 2])
+        pmask = tf.cast(box_b > 0, dtype)
+        box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+        shift = -pmask * box_safe * tf.round(delta_b0 / box_safe)
+        b0 = b0 + shift
+        b1 = b1 + shift
+
+    cand_0safe = tf.maximum(cand, 1) - 1
+    active = tf.cast(tf.not_equal(cand, 0), dtype)
+    ab     = b1 - b0
+    ab2    = tf.reduce_sum(ab * ab, axis=2)
+
+    sg0 = tf.constant((1.0 - 1.0 / 3.0**0.5) / 2.0, dtype=dtype)
+    sg1 = tf.constant((1.0 + 1.0 / 3.0**0.5) / 2.0, dtype=dtype)
+    wg  = tf.constant(0.5, dtype=dtype)
+
+    r_c_cand  = tf.reshape(tf.gather(r_c_flat, tf.reshape(cand_0safe, [-1])),
+                           [K, E_])
+    contact_r = r_c_flat[:, None] + r_c_cand
+
+    U_cc = _zero
+    for sg in [sg0, sg1]:
+        w0 = _one - sg
+        xq = w0 * a0 + sg * a1
+        xq_e = xq[:, None, :]
+        diff_b0 = xq_e - b0
+        if box is not None:
+            box_b = tf.reshape(box, [1, 1, 2])
+            pmask = tf.cast(box_b > 0, dtype)
+            box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+            diff_b0 = diff_b0 - pmask * box_safe * tf.round(diff_b0 / box_safe)
+        dot_num = tf.reduce_sum(diff_b0 * ab, axis=2)
+        t_B = tf.clip_by_value(
+            tf.where(ab2 > _tiny,
+                     dot_num / tf.maximum(ab2, _tiny),
+                     tf.fill([K, E_], _half)),
+            _zero, _one)
+        diff = diff_b0 - t_B[:, :, None] * ab
+        d    = tf.sqrt(tf.reduce_sum(diff * diff, axis=2))
+        gap  = d - contact_r
+        in_contact = tf.cast(gap < _zero, dtype) * active
+        U_cc = U_cc + tf.reduce_sum(
+            _half * k_c_flat[:, None] * gap * gap *
+            L0_flat[:, None] * wg * in_contact)
+    U_cc = _half * U_cc
+
+    # Primitive contact (segments + arcs)
+    U_prim = _zero
+    if prim_data is not None:
+        a0_flat = tf.reshape(x_all, [K, 2])
+        a1_flat = tf.reshape(tf.roll(x_all, shift=-1, axis=1), [K, 2])
+
+        seg_omega = prim_data['seg_omega']
+        seg_r_ref = prim_data['seg_r_ref']
+        t_eval = tf.constant(0.0, dtype=dtype)
+        cos_s = tf.cos(seg_omega * t_eval)
+        sin_s = tf.sin(seg_omega * t_eval)
+        def _rotate_pts(pts_ref):
+            dp = pts_ref - seg_r_ref
+            rot_x = cos_s * dp[:, 0] - sin_s * dp[:, 1]
+            rot_y = sin_s * dp[:, 0] + cos_s * dp[:, 1]
+            return seg_r_ref + tf.stack([rot_x, rot_y], axis=1) + \
+                   prim_data['seg_vel'] * t_eval
+        seg_p0 = _rotate_pts(prim_data['seg_p0'])
+        seg_p1 = _rotate_pts(prim_data['seg_p1'])
+        dn = prim_data['seg_n']
+        seg_n = tf.stack([cos_s * dn[:, 0] - sin_s * dn[:, 1],
+                          sin_s * dn[:, 0] + cos_s * dn[:, 1]], axis=1)
+
+        ab_seg  = seg_p1 - seg_p0
+        ab2_seg = tf.reduce_sum(ab_seg * ab_seg, axis=1)
+
+        arc_omega = prim_data['arc_omega']
+        arc_r_ref = prim_data['arc_r_ref']
+        cos_a = tf.cos(arc_omega * t_eval)
+        sin_a = tf.sin(arc_omega * t_eval)
+        dc = prim_data['arc_c'] - arc_r_ref
+        arc_c = arc_r_ref + tf.stack([cos_a * dc[:, 0] - sin_a * dc[:, 1],
+                                       sin_a * dc[:, 0] + cos_a * dc[:, 1]],
+                                      axis=1) + prim_data['arc_vel'] * t_eval
+
+        Ng = prim_data['grp_seg'].shape[0]
+        Ms = prim_data['grp_seg'].shape[1]
+        Ls = seg_p0.shape[0]
+
+        for sg in [sg0, sg1]:
+            w0 = _one - sg
+            xq = w0 * a0_flat + sg * a1_flat
+            xq_e = xq[:, None, :]
+            p0_e = seg_p0[None, :, :]
+            ab_e = ab_seg[None, :, :]
+            if box is not None:
+                box_b = tf.reshape(box, [1, 1, 2])
+                pmask = tf.cast(box_b > 0, dtype)
+                box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+                delta_pre = xq_e - p0_e
+                xq_e = xq_e - pmask * box_safe * tf.round(delta_pre / box_safe)
+            diff0 = xq_e - p0_e
+            dot_n = tf.reduce_sum(diff0 * ab_e, axis=2)
+            t_raw = dot_n / tf.maximum(ab2_seg[None, :], _tiny)
+            t_seg = tf.clip_by_value(t_raw, _zero, _one)
+            t_in_seg = tf.cast((t_raw >= _zero) & (t_raw <= _one), dtype)
+            is_standalone = tf.cast(prim_data['seg_grp_flat_idx'] < 0, dtype)[None, :]
+            seg_in_seg = _one - is_standalone + is_standalone * t_in_seg
+
+            cp_seg = p0_e + t_seg[:, :, None] * ab_e
+            diff_s = xq_e - cp_seg
+            n_e    = seg_n[None, :, :]
+            gap_s  = tf.reduce_sum(diff_s * n_e, axis=2)
+
+            seg_active = tf.ones([K, Ls], dtype=dtype)
+            if Ng > 0:
+                _INF = tf.constant(1e30, dtype=dtype)
+                grp_seg_flat = tf.reshape(prim_data['grp_seg'], [-1])
+                grp_seg_safe = tf.maximum(grp_seg_flat, 0)
+                gap_grp = tf.gather(gap_s, grp_seg_safe, axis=1)
+                gap_grp = tf.reshape(gap_grp, [K, Ng, Ms])
+                mask_e  = prim_data['grp_mask'][None, :, :]
+                gap_grp_masked = tf.where(mask_e, gap_grp,
+                                          tf.fill(tf.shape(gap_grp), -_INF))
+                argmax_poly = tf.argmax(gap_grp_masked, axis=2,
+                                        output_type=tf.int32)
+                active_slots = (tf.one_hot(argmax_poly, Ms, dtype=dtype)
+                                * tf.cast(mask_e, dtype))
+                active_flat  = tf.reshape(active_slots, [K, Ng * Ms])
+                seg_grp_idx  = prim_data['seg_grp_flat_idx']
+                is_poly      = tf.cast(seg_grp_idx >= 0, dtype)
+                grp_safe     = tf.maximum(seg_grp_idx, 0)
+                poly_act     = tf.gather(active_flat, grp_safe, axis=1)
+                seg_active = (_one - is_poly[None, :]) + is_poly[None, :] * poly_act
+
+            r_c_eff = r_c_flat[:, None] + prim_data['seg_r_c'][None, :]
+            gap_eff = gap_s - r_c_eff
+            in_c    = tf.cast(gap_eff < _zero, dtype) * seg_active * seg_in_seg
+            k_eff   = k_c_flat[:, None] * prim_data['seg_k_pen'][None, :]
+            U_prim = U_prim + tf.reduce_sum(
+                _half * k_eff * gap_eff * gap_eff *
+                L0_flat[:, None] * wg * in_c)
+
+            xq_arc = xq[:, None, :]
+            c_e = arc_c[None, :, :]
+            if box is not None:
+                box_b = tf.reshape(box, [1, 1, 2])
+                pmask = tf.cast(box_b > 0, dtype)
+                box_safe = tf.where(box_b > 0, box_b, tf.ones_like(box_b))
+                delta_pre = xq_arc - c_e
+                xq_arc = xq_arc - pmask * box_safe * tf.round(delta_pre / box_safe)
+            diff_a = xq_arc - c_e
+            dist_a = tf.sqrt(tf.reduce_sum(diff_a * diff_a, axis=2))
+            arc_sgn = prim_data['arc_sgn']
+            gap_a   = arc_sgn[None, :] * (dist_a - prim_data['arc_R'][None, :])
+            r_c_a   = r_c_flat[:, None] + prim_data['arc_r_c'][None, :]
+            gap_a_eff = gap_a - r_c_a
+            in_ca   = tf.cast(gap_a_eff < _zero, dtype)
+            k_eff_a = k_c_flat[:, None] * prim_data['arc_k_pen'][None, :]
+            U_prim = U_prim + tf.reduce_sum(
+                _half * k_eff_a * gap_a_eff * gap_a_eff *
+                L0_flat[:, None] * wg * in_ca)
+
+    return tf.stack([U_edge, U_bend, U_area, U_lt, U_cc, U_prim])
+
+
 # ── fused full step (contact + primitives + internal + RB integration) ────────
 
 @tf.function(jit_compile=True)
