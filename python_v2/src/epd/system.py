@@ -1628,6 +1628,15 @@ class System:
             rate_var = tf.Variable([float(self._box_rate[0]), float(self._box_rate[1])],
                                     dtype=DTYPE)
 
+            # box as tf.Variable so we can update it after sync_box (Lx changes
+            # under compression). Closure-captured constant would be stale.
+            # box[i] = 0 means non-periodic on axis i (kernel's per-axis encoding).
+            _box_init = self._params.get('box', None)
+            if _box_init is not None:
+                box_var = tf.Variable(_box_init, dtype=DTYPE)
+            else:
+                box_var = tf.Variable(tf.zeros([2], dtype=DTYPE))
+
             # ADAM state
             m_var    = tf.Variable(tf.zeros_like(x_var), dtype=DTYPE)
             v_varad  = tf.Variable(tf.zeros_like(x_var), dtype=DTYPE)
@@ -1637,7 +1646,6 @@ class System:
             r_c_flat = tf.repeat(self._params['r_c_per_p'], N_)
             k_c_flat = tf.repeat(self._params['k_c_per_p'], N_)
             L0_flat  = tf.repeat(self._params['L0'],        N_)
-            box      = self._params.get('box', None)
             prim     = self._prim_data
             dt_const = tf.constant(self._dt, dtype=DTYPE)
 
@@ -1653,10 +1661,10 @@ class System:
             one     = tf.constant(1.0,   dtype=DTYPE)
 
             def force_fn(x, caps):
-                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 if prim is not None:
                     f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
-                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box)
+                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 return (internal_forces_tf(x, self._params, 0.0)
                         + k_reg_forces_tf(x, self._params) + f_c)
 
@@ -1670,19 +1678,22 @@ class System:
                     v_varad.assign(beta2_t * v_varad + (one - beta2_t) * grad * grad)
                     bc1 = one - tf.pow(beta1_t, tf.cast(t_var, DTYPE))
                     bc2 = one - tf.pow(beta2_t, tf.cast(t_var, DTYPE))
-                    delta = -lr_t * (m_var / bc1) / (tf.sqrt(v_varad / bc2) + eps_t)
+                    adam_delta = -lr_t * (m_var / bc1) / (tf.sqrt(v_varad / bc2) + eps_t)
 
-                    # Box compression (mirrors kernel's CM affine update)
-                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
-                    delta_cm = x_cm * rate_var[None, None, :] * dt_const
-                    delta = delta + tf.broadcast_to(delta_cm, delta.shape)
-
+                    # Clip ADAM step only (don't clip box compression — sync_box
+                    # tracks Lx at commanded rate and any shrink-mismatch breaks
+                    # the periodic box).
                     if do_clip:
-                        max_d = tf.reduce_max(tf.norm(delta, axis=2))
+                        max_d = tf.reduce_max(tf.norm(adam_delta, axis=2))
                         scale = tf.minimum(one, max_step_lim / (max_d + eps_t))
                         clipped = clipped + tf.cast(scale < one, tf.int32)
-                        delta = delta * scale
-                    x_var.assign_add(delta)
+                        adam_delta = adam_delta * scale
+
+                    # Box compression (mirrors kernel's CM affine update on x_cm)
+                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
+                    box_delta = tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const,
+                                                  x_var.shape)
+                    x_var.assign_add(adam_delta + box_delta)
                 return clipped
 
             inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
@@ -1724,6 +1735,9 @@ class System:
                 # Sync box bookkeeping (Lx, params['box'], PRCM box)
                 if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
                     self.sync_box(n_to_do)
+                    # Refresh in-graph box_var so min-image sees the new box
+                    if self._params.get('box', None) is not None:
+                        box_var.assign(self._params['box'])
 
                 # Write x_var → self._state (so callback / snapshot see it)
                 self._write_xvar_to_state(x_var)
@@ -1814,6 +1828,12 @@ class System:
             rate_var = tf.Variable([float(self._box_rate[0]), float(self._box_rate[1])],
                                     dtype=DTYPE)
 
+            _box_init = self._params.get('box', None)
+            if _box_init is not None:
+                box_var = tf.Variable(_box_init, dtype=DTYPE)
+            else:
+                box_var = tf.Variable(tf.zeros([2], dtype=DTYPE))
+
             # FIRE state (Variables so they persist across @tf.function calls)
             dt_var       = tf.Variable(dt_init,      dtype=DTYPE)
             alpha_var    = tf.Variable(alpha_start,  dtype=DTYPE)
@@ -1822,7 +1842,6 @@ class System:
             r_c_flat = tf.repeat(self._params['r_c_per_p'], N_)
             k_c_flat = tf.repeat(self._params['k_c_per_p'], N_)
             L0_flat  = tf.repeat(self._params['L0'],        N_)
-            box      = self._params.get('box', None)
             prim     = self._prim_data
             dt_const = tf.constant(self._dt, dtype=DTYPE)
 
@@ -1841,10 +1860,10 @@ class System:
             N_min_t  = tf.constant(N_min,  dtype=tf.int32)
 
             def force_fn(x, caps):
-                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 if prim is not None:
                     f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
-                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box)
+                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 return (internal_forces_tf(x, self._params, 0.0)
                         + k_reg_forces_tf(x, self._params) + f_c)
 
@@ -1869,18 +1888,22 @@ class System:
                         alpha_var.assign(alpha_start_t)
                         n_pos_var.assign(0)
 
-                    # F6: Verlet (this is the position update; combine box compression too)
+                    # F6: Verlet position step
                     v_var.assign_add(dt_var * f)
-                    delta = dt_var * v_var
-                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
-                    delta = delta + tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const, delta.shape)
+                    fire_delta = dt_var * v_var
 
+                    # Clip FIRE step only (box compression is exact; clipping it
+                    # would desync sync_box's Lx tracking from actual particle motion)
                     if do_clip:
-                        max_d = tf.reduce_max(tf.norm(delta, axis=2))
+                        max_d = tf.reduce_max(tf.norm(fire_delta, axis=2))
                         scale = tf.minimum(one, max_step_lim / (max_d + tiny))
                         clipped = clipped + tf.cast(scale < one, tf.int32)
-                        delta = delta * scale
-                    x_var.assign_add(delta)
+                        fire_delta = fire_delta * scale
+
+                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
+                    box_delta = tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const,
+                                                  x_var.shape)
+                    x_var.assign_add(fire_delta + box_delta)
                 return clipped
 
             inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
@@ -1916,6 +1939,8 @@ class System:
 
                 if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
                     self.sync_box(n_to_do)
+                    if self._params.get('box', None) is not None:
+                        box_var.assign(self._params['box'])
 
                 self._write_xvar_to_state(x_var)
 
