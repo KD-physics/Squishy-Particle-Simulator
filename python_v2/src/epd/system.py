@@ -1296,6 +1296,90 @@ class System:
             'total': float(comp.sum()),
         }
 
+    def eval_kinetic_energy(self, state=None):
+        """
+        Per-mode kinetic energy at the given state (defaults to current).
+
+        Returns
+        -------
+        dict with keys: 'KE_trans', 'KE_rot', 'KE_int', 'total'
+
+          KE_trans = ½ Σ_p M_p · v_cm_p²        (rigid-body translation)
+          KE_rot   = ½ Σ_p I_p · omega_p²       (rigid-body rotation)
+          KE_int   = ½ Σ_p,n m_node_p · u_dot_pn²  (internal shape modes)
+
+        Useful inside a callback (e.g., during s.run()) to log per-mode KE
+        leakage from PE — diagnostic for whether the IC is at true mechanical
+        equilibrium or slowly draining PE → KE → drag.
+        """
+        import numpy as np
+        st = self._state if state is None else state
+        M    = self._params['M_disk'].numpy()        # (P,)
+        I    = self._params['I_disk'].numpy()        # (P,)
+        m    = self._params['m_node'].numpy()        # (P,) per-particle node mass
+        v_cm  = st['v_cm'].numpy()                   # (P, 2)
+        omega = st['omega'].numpy()                  # (P,)
+        u_dot = st['u_dot'].numpy()                  # (P, N, 2)
+
+        KE_trans = 0.5 * float(np.sum(M * np.sum(v_cm**2, axis=1)))
+        KE_rot   = 0.5 * float(np.sum(I * omega**2))
+        KE_int   = 0.5 * float(np.sum(m[:, None] * np.sum(u_dot**2, axis=2)))
+        return {'KE_trans': KE_trans, 'KE_rot': KE_rot,
+                'KE_int':   KE_int,   'total':  KE_trans + KE_rot + KE_int}
+
+    def eval_force_balance(self, x_all=None, top_k=10):
+        """
+        Per-node force-balance summary at x_all (defaults to current state).
+
+        Returns
+        -------
+        dict with keys:
+          'F_max'   : float — max per-node force magnitude
+          'F_mean'  : float — mean
+          'F_99pct' : float — 99th percentile
+          'top_stuck' : list of (particle_idx, node_idx, |F|) for the top_k
+                        highest-|F| nodes — diagnostic for "where is the
+                        force imbalance concentrated".
+
+        For a true mechanical equilibrium |F|_max → 0. In dense packings with
+        cusp-bound contacts there's typically a small residual; if F_99pct
+        is much smaller than F_max, only a few specific nodes (frustrated
+        contact clusters) are stuck.
+        """
+        import numpy as np
+        import tensorflow as tf
+        DTYPE = self._state['x_all'].dtype
+        if x_all is None:
+            f = self.eval_forces()['f_total']             # (P, N, 2) numpy
+        else:
+            x = tf.constant(x_all, dtype=DTYPE) if not hasattr(x_all, 'numpy') else x_all
+            from src.simulation.tf_sim import (internal_forces_tf, k_reg_forces_tf,
+                                                 inter_capsule_forces_tf, primitive_forces_tf)
+            N_nodes = x.shape[1]
+            r_c_flat = tf.repeat(self._params['r_c_per_p'], N_nodes)
+            k_c_flat = tf.repeat(self._params['k_c_per_p'], N_nodes)
+            L0_flat  = tf.repeat(self._params['L0'],        N_nodes)
+            box      = self._params.get('box', None)
+            caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+            f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+            if self._prim_data is not None:
+                t0 = tf.constant(0.0, dtype=DTYPE)
+                f_c = f_c + primitive_forces_tf(x, t0, self._prim_data,
+                                                 r_c_flat, k_c_flat, L0_flat, box=box)
+            f = (internal_forces_tf(x, self._params, 0.0)
+                 + k_reg_forces_tf(x, self._params) + f_c).numpy()
+        f_mag = np.linalg.norm(f, axis=2)               # (P, N)
+        flat  = f_mag.flatten()
+        P_, N_ = f_mag.shape
+        top_idx = np.argsort(-flat)[:top_k]
+        top_stuck = [(int(k // N_), int(k % N_), float(flat[k])) for k in top_idx]
+        return {
+            'F_max':   float(flat.max()),
+            'F_mean':  float(flat.mean()),
+            'F_99pct': float(np.percentile(flat, 99)),
+            'top_stuck': top_stuck,
+        }
+
     def sync_from_var(self, x_all_var):
         """
         Pull a tf.Variable's values back into the live System state after an
@@ -1418,6 +1502,456 @@ class System:
             if verbose and n_chunks >= 5:
                 elapsed = _time.time() - _t0
                 print(f"    chunk {n_chunks}/{n_chunks}  t={self.t:.3f}  ({elapsed:.0f}s)")
+
+        return self
+
+    # ── optimizer drivers (parallel to run() — ADAM, FIRE) ───────────────────
+
+    def _write_xvar_to_state(self, x_var):
+        """Write a tf.Variable's contents into self._state. Picks θ=0
+        decomposition (rotation absorbed into u) so x_all = x_cm + (X_ref + u)
+        is consistent for the integrator. Zeros velocities. Applies periodic
+        wrap. Does NOT refresh PRCM (caller controls that)."""
+        import tensorflow as tf
+        dtype = self._state['x_all'].dtype
+        x_new    = tf.constant(x_var.numpy(), dtype=dtype)
+        x_cm_new = tf.reduce_mean(x_new, axis=1)
+        X_ref    = self._state['X_ref']
+        u_new    = (x_new - x_cm_new[:, None, :]) - X_ref
+        self._state = {
+            **self._state,
+            'x_all': x_new,
+            'x_cm':  x_cm_new,
+            'theta': tf.zeros_like(self._state['theta']),
+            'u':     u_new,
+            'v_cm':  tf.zeros_like(self._state['v_cm']),
+            'omega': tf.zeros_like(self._state['omega']),
+            'u_dot': tf.zeros_like(self._state['u_dot']),
+        }
+        self._state = self._wrap_state(self._state)
+
+    def _save_damping(self):
+        """Snapshot damping params; returned dict is consumed by _restore_damping."""
+        import tensorflow as tf
+        return {
+            'xi':       tf.constant(self._params['xi_drag_per_p'].numpy(),
+                                     dtype=self._params['xi_drag_per_p'].dtype),
+            'alpha_s':  tf.constant(self._params['_alpha_tf'].numpy(),
+                                     dtype=self._params['_alpha_tf'].dtype),
+            'alpha_pp': tf.constant(self._params['alpha_damp_per_p'].numpy(),
+                                     dtype=self._params['alpha_damp_per_p'].dtype),
+            'beta_rb':  float(self._beta_rb),
+        }
+
+    def _restore_damping(self, snap):
+        """Restore damping params from a snapshot dict."""
+        self._params['xi_drag_per_p']    = snap['xi']
+        self._params['_alpha_tf']        = snap['alpha_s']
+        self._params['alpha_damp_per_p'] = snap['alpha_pp']
+        self.beta_rb                     = snap['beta_rb']
+
+    def _zero_damping_for_optimizer(self):
+        """Zero xi/alpha/beta during optimizer drivers (ADAM/FIRE)."""
+        import tensorflow as tf
+        DTYPE = self._params['_alpha_tf'].dtype
+        P = int(self._params['xi_drag_per_p'].shape[0])
+        self._params['xi_drag_per_p']    = tf.zeros([P], dtype=DTYPE)
+        self._params['_alpha_tf']        = tf.constant(0.0, dtype=DTYPE)
+        self._params['alpha_damp_per_p'] = tf.zeros([P], dtype=DTYPE)
+        self.beta_rb = 0.0
+
+    def adam(self, N, sample_every=None, callback=None, record_initial=True,
+             cand_check_interval=30, verbose=True, use_tf_function=True,
+             lr=1e-3, beta1=0.9, beta2=0.999, eps=1e-8,
+             clip_step=True, max_step_frac=0.2):
+        """
+        Run N ADAM optimizer steps. Mirror of s.run() in scaffolding (chunks,
+        callbacks, frames, watchdog) but uses ADAM update on −F instead of
+        physics integration.
+
+        Behavior matched to s.run():
+          - Honors `s.box_rate` (per-step affine CM compression, same formula
+            the kernel uses)
+          - Refreshes PRCM every `cand_check_interval` steps (same Q/L1L2
+            cadence as physics; defaults to 30 to match PRCM's Q-refresh)
+          - Records snapshots to `self.frames` and callback returns to
+            `self.callback_data` every `sample_every` steps
+          - sample_every and cand_check_interval are decoupled (chunks are
+            bounded by the smaller of the two)
+
+        Differences from s.run():
+          - No physics integration — no v_cm, omega, u_dot evolution
+          - Drag (xi, α, β_rb) is auto-zeroed on entry, restored on exit
+          - Velocities zeroed on entry AND exit (subsequent s.run() starts at rest)
+          - θ set to 0 on each writeback (rotation absorbed into u)
+          - Adds per-step DOF clipping: if any node would move > max_step_frac·r_c_min
+            in one step, ALL DOFs are scaled down to keep direction; one-shot
+            NOTE + summary at end if engaged (avoids inter-penetration)
+
+        Parameters
+        ----------
+        N                   : int — total ADAM steps
+        sample_every        : int — chunk size = recording cadence (default: N)
+        callback            : callable(sys) → dict or None
+        record_initial      : bool
+        cand_check_interval : int — PRCM refresh cadence (default 30)
+        verbose             : bool
+        use_tf_function     : bool — wrap inner chunk in @tf.function (recommended;
+                              eager mode has 10× per-step overhead)
+        lr, beta1, beta2, eps : standard ADAM hyperparameters
+        clip_step           : bool — enforce per-step displacement ceiling
+        max_step_frac       : float — fraction of min(r_c) any node may move per step
+        """
+        import time as _time
+        import tensorflow as tf
+        import numpy as np
+        from src.simulation.tf_sim import (internal_forces_tf, k_reg_forces_tf,
+                                             inter_capsule_forces_tf, primitive_forces_tf)
+        if sample_every is None: sample_every = N
+        DTYPE = self._state['x_all'].dtype
+        P_, N_ = int(self._state['x_all'].shape[0]), int(self._state['x_all'].shape[1])
+
+        # Zero velocities on entry; save+zero damping
+        self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+        self._state['omega'] = tf.zeros_like(self._state['omega'])
+        self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
+        damp_snap = self._save_damping()
+        self._zero_damping_for_optimizer()
+
+        # ── one-time graph setup ─────────────────────────────────────────────
+        # Pass caps as a tensor ARGUMENT (not Variable) to dodge the int32-on-CPU
+        # vs float64-on-GPU device-mismatch headache inside @tf.function.
+        # TF caches trace by input signature (shape+dtype), so values can
+        # change call-to-call without re-tracing.
+        try:
+            x_var    = tf.Variable(self._state['x_all'], dtype=DTYPE)
+            rate_var = tf.Variable([float(self._box_rate[0]), float(self._box_rate[1])],
+                                    dtype=DTYPE)
+
+            # ADAM state
+            m_var    = tf.Variable(tf.zeros_like(x_var), dtype=DTYPE)
+            v_varad  = tf.Variable(tf.zeros_like(x_var), dtype=DTYPE)
+            t_var    = tf.Variable(0, dtype=tf.int64)
+
+            # Pre-flat per-edge constants (capture as graph closure)
+            r_c_flat = tf.repeat(self._params['r_c_per_p'], N_)
+            k_c_flat = tf.repeat(self._params['k_c_per_p'], N_)
+            L0_flat  = tf.repeat(self._params['L0'],        N_)
+            box      = self._params.get('box', None)
+            prim     = self._prim_data
+            dt_const = tf.constant(self._dt, dtype=DTYPE)
+
+            # Step-clipping ceiling
+            r_c_min = float(self._params['r_c_per_p'].numpy().min())
+            max_step_lim = tf.constant(max_step_frac * r_c_min, dtype=DTYPE)
+            do_clip = bool(clip_step)
+
+            beta1_t = tf.constant(beta1, dtype=DTYPE)
+            beta2_t = tf.constant(beta2, dtype=DTYPE)
+            eps_t   = tf.constant(eps,   dtype=DTYPE)
+            lr_t    = tf.constant(lr,    dtype=DTYPE)
+            one     = tf.constant(1.0,   dtype=DTYPE)
+
+            def force_fn(x, caps):
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+                if prim is not None:
+                    f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
+                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box)
+                return (internal_forces_tf(x, self._params, 0.0)
+                        + k_reg_forces_tf(x, self._params) + f_c)
+
+            def _inner_chunk(caps, n_steps):
+                clipped = tf.constant(0, dtype=tf.int32)
+                for _ in tf.range(n_steps):
+                    f = force_fn(x_var, caps)
+                    grad = -f
+                    t_var.assign_add(1)
+                    m_var.assign(beta1_t * m_var + (one - beta1_t) * grad)
+                    v_varad.assign(beta2_t * v_varad + (one - beta2_t) * grad * grad)
+                    bc1 = one - tf.pow(beta1_t, tf.cast(t_var, DTYPE))
+                    bc2 = one - tf.pow(beta2_t, tf.cast(t_var, DTYPE))
+                    delta = -lr_t * (m_var / bc1) / (tf.sqrt(v_varad / bc2) + eps_t)
+
+                    # Box compression (mirrors kernel's CM affine update)
+                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
+                    delta_cm = x_cm * rate_var[None, None, :] * dt_const
+                    delta = delta + tf.broadcast_to(delta_cm, delta.shape)
+
+                    if do_clip:
+                        max_d = tf.reduce_max(tf.norm(delta, axis=2))
+                        scale = tf.minimum(one, max_step_lim / (max_d + eps_t))
+                        clipped = clipped + tf.cast(scale < one, tf.int32)
+                        delta = delta * scale
+                    x_var.assign_add(delta)
+                return clipped
+
+            inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
+
+            # ── outer chunked loop ───────────────────────────────────────────
+            def _record(idx):
+                snap = self.snapshot()
+                self.frames.append(snap)
+                cbd = callback(self) if callback is not None else {}
+                self.callback_data.append(cbd if cbd is not None else {})
+
+            if record_initial:
+                _record(0)
+
+            n_done = 0
+            n_clipped_total = 0
+            clip_warned = False
+            t0 = _time.time()
+            chunk_idx = 0
+            n_total_chunks_est = max(1, N // min(sample_every, cand_check_interval))
+
+            while n_done < N:
+                # Chunk size: bounded by sample_every and cand_check_interval boundaries
+                n_to_sample = sample_every - (n_done % sample_every)
+                n_to_prcm   = cand_check_interval - (n_done % cand_check_interval)
+                n_to_do     = min(n_to_sample, n_to_prcm, N - n_done)
+
+                # Pick up any rate change the user made between calls
+                rate_var.assign([float(self._box_rate[0]), float(self._box_rate[1])])
+
+                # Run inner chunk — caps passed as tensor argument (re-used trace)
+                caps_t = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+                clipped_in_chunk = int(inner_chunk(caps_t,
+                                                    tf.constant(n_to_do, dtype=tf.int32)).numpy())
+                n_done += n_to_do
+                n_clipped_total += clipped_in_chunk
+                chunk_idx += 1
+
+                # Sync box bookkeeping (Lx, params['box'], PRCM box)
+                if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
+                    self.sync_box(n_to_do)
+
+                # Write x_var → self._state (so callback / snapshot see it)
+                self._write_xvar_to_state(x_var)
+
+                # PRCM refresh boundary
+                if n_done % cand_check_interval == 0:
+                    if self._cm_mgr.needs_update(self._state['x_cm'].numpy(),
+                                                  self._state['theta'].numpy()):
+                        self._cm_mgr.update(self._state['x_cm'].numpy(),
+                                             self._state['theta'].numpy(),
+                                             x_all=self._state['x_all'].numpy())
+                        # caps fetched fresh from s._cm_mgr.CapCandidates next chunk
+
+                # Sampling boundary
+                if n_done % sample_every == 0:
+                    _record(n_done // sample_every)
+
+                # One-shot clip warning
+                if clipped_in_chunk > 0 and not clip_warned:
+                    print(f"NOTE (adam): step clipping engaged "
+                          f"({clipped_in_chunk}/{n_to_do} steps in chunk {chunk_idx} hit "
+                          f"the {max_step_frac*100:.0f}%·r_c_min ceiling). "
+                          f"Consider lowering lr if persistent. "
+                          f"(One-shot — won't fire again this call.)")
+                    clip_warned = True
+
+                if verbose and chunk_idx % max(1, n_total_chunks_est // 5) == 0:
+                    elapsed = _time.time() - t0
+                    print(f"    adam chunk {chunk_idx}  step={n_done}/{N}  "
+                          f"({elapsed:.1f}s)")
+
+            if verbose:
+                pct = 100.0 * n_clipped_total / max(N, 1)
+                print(f"  [adam] done: {N} steps, {n_clipped_total} clipped ({pct:.2f}%)  "
+                      f"in {_time.time()-t0:.1f}s")
+
+        finally:
+            # Restore damping; zero velocities (already zero, but explicit)
+            self._restore_damping(damp_snap)
+            self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+            self._state['omega'] = tf.zeros_like(self._state['omega'])
+            self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
+
+        return self
+
+    def fire(self, N, sample_every=None, callback=None, record_initial=True,
+             cand_check_interval=30, verbose=True, use_tf_function=True,
+             dt_init=0.005, dt_max=0.03, alpha_start=0.05, N_min=20,
+             f_inc=1.1, f_dec=0.5, f_alpha=0.99,
+             clip_step=True, max_step_frac=0.2):
+        """
+        Run N FIRE (Bitzek 2006) optimizer steps. Mirror of s.run() in scaffolding
+        (see s.adam() for the shared pattern).
+
+        FIRE algorithm:
+          F1: f = -∇U  (= eval_forces_at)
+          F2: P = f · v
+          F3: v ← (1−α)·v + α·|v|·F̂           (mix v toward F̂)
+          F4: P > 0 for > N_min steps:  dt = min(dt·f_inc, dt_max);  α = α·f_α
+          F5: P ≤ 0:  dt = dt·f_dec;  v = 0;  α = α_start
+          F6: v ← v + dt·f;  x ← x + dt·v       (Verlet integrate)
+
+        Same auto-handling as adam: drag zeroed, velocities zeroed at start/end,
+        θ=0 on writeback, step clipping, PRCM refresh, frames/callback recording.
+
+        Defaults are 'tight' Bitzek (dt_max=0.03, N_min=20, alpha_start=0.05) —
+        more conservative cusp crossing, lower achievable |F|_max in marginal-
+        jamming regimes than stock Bitzek (dt_max=0.10, N_min=5).
+        """
+        import time as _time
+        import tensorflow as tf
+        import numpy as np
+        from src.simulation.tf_sim import (internal_forces_tf, k_reg_forces_tf,
+                                             inter_capsule_forces_tf, primitive_forces_tf)
+        if sample_every is None: sample_every = N
+        DTYPE = self._state['x_all'].dtype
+        P_, N_ = int(self._state['x_all'].shape[0]), int(self._state['x_all'].shape[1])
+
+        self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+        self._state['omega'] = tf.zeros_like(self._state['omega'])
+        self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
+        damp_snap = self._save_damping()
+        self._zero_damping_for_optimizer()
+
+        try:
+            x_var    = tf.Variable(self._state['x_all'], dtype=DTYPE)
+            v_var    = tf.Variable(tf.zeros_like(x_var), dtype=DTYPE)
+            rate_var = tf.Variable([float(self._box_rate[0]), float(self._box_rate[1])],
+                                    dtype=DTYPE)
+
+            # FIRE state (Variables so they persist across @tf.function calls)
+            dt_var       = tf.Variable(dt_init,      dtype=DTYPE)
+            alpha_var    = tf.Variable(alpha_start,  dtype=DTYPE)
+            n_pos_var    = tf.Variable(0,            dtype=tf.int32)
+
+            r_c_flat = tf.repeat(self._params['r_c_per_p'], N_)
+            k_c_flat = tf.repeat(self._params['k_c_per_p'], N_)
+            L0_flat  = tf.repeat(self._params['L0'],        N_)
+            box      = self._params.get('box', None)
+            prim     = self._prim_data
+            dt_const = tf.constant(self._dt, dtype=DTYPE)
+
+            r_c_min = float(self._params['r_c_per_p'].numpy().min())
+            max_step_lim = tf.constant(max_step_frac * r_c_min, dtype=DTYPE)
+            do_clip = bool(clip_step)
+
+            zero  = tf.constant(0.0, dtype=DTYPE)
+            one   = tf.constant(1.0, dtype=DTYPE)
+            tiny  = tf.constant(1e-30, dtype=DTYPE)
+            f_inc_t  = tf.constant(f_inc,  dtype=DTYPE)
+            f_dec_t  = tf.constant(f_dec,  dtype=DTYPE)
+            f_alpha_t = tf.constant(f_alpha, dtype=DTYPE)
+            dt_max_t  = tf.constant(dt_max,  dtype=DTYPE)
+            alpha_start_t = tf.constant(alpha_start, dtype=DTYPE)
+            N_min_t  = tf.constant(N_min,  dtype=tf.int32)
+
+            def force_fn(x, caps):
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+                if prim is not None:
+                    f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
+                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box)
+                return (internal_forces_tf(x, self._params, 0.0)
+                        + k_reg_forces_tf(x, self._params) + f_c)
+
+            def _inner_chunk(caps, n_steps):
+                clipped = tf.constant(0, dtype=tf.int32)
+                for _ in tf.range(n_steps):
+                    f = force_fn(x_var, caps)
+                    Pn = tf.reduce_sum(f * v_var)
+                    # F3: mix v toward F̂
+                    v_norm = tf.sqrt(tf.reduce_sum(v_var * v_var) + tiny)
+                    f_norm = tf.sqrt(tf.reduce_sum(f * f) + tiny)
+                    v_var.assign((one - alpha_var) * v_var + (alpha_var * v_norm / f_norm) * f)
+                    # F4 / F5
+                    if Pn > zero:
+                        if n_pos_var > N_min_t:
+                            dt_var.assign(tf.minimum(dt_var * f_inc_t, dt_max_t))
+                            alpha_var.assign(alpha_var * f_alpha_t)
+                        n_pos_var.assign_add(1)
+                    else:
+                        dt_var.assign(dt_var * f_dec_t)
+                        v_var.assign(tf.zeros_like(v_var))
+                        alpha_var.assign(alpha_start_t)
+                        n_pos_var.assign(0)
+
+                    # F6: Verlet (this is the position update; combine box compression too)
+                    v_var.assign_add(dt_var * f)
+                    delta = dt_var * v_var
+                    x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
+                    delta = delta + tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const, delta.shape)
+
+                    if do_clip:
+                        max_d = tf.reduce_max(tf.norm(delta, axis=2))
+                        scale = tf.minimum(one, max_step_lim / (max_d + tiny))
+                        clipped = clipped + tf.cast(scale < one, tf.int32)
+                        delta = delta * scale
+                    x_var.assign_add(delta)
+                return clipped
+
+            inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
+
+            def _record(idx):
+                snap = self.snapshot()
+                self.frames.append(snap)
+                cbd = callback(self) if callback is not None else {}
+                self.callback_data.append(cbd if cbd is not None else {})
+
+            if record_initial:
+                _record(0)
+
+            n_done = 0
+            n_clipped_total = 0
+            clip_warned = False
+            t0 = _time.time()
+            chunk_idx = 0
+            n_total_chunks_est = max(1, N // min(sample_every, cand_check_interval))
+
+            while n_done < N:
+                n_to_do = min(sample_every - (n_done % sample_every),
+                               cand_check_interval - (n_done % cand_check_interval),
+                               N - n_done)
+                rate_var.assign([float(self._box_rate[0]), float(self._box_rate[1])])
+
+                caps_t = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+                clipped_in_chunk = int(inner_chunk(caps_t,
+                                                    tf.constant(n_to_do, dtype=tf.int32)).numpy())
+                n_done += n_to_do
+                n_clipped_total += clipped_in_chunk
+                chunk_idx += 1
+
+                if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
+                    self.sync_box(n_to_do)
+
+                self._write_xvar_to_state(x_var)
+
+                if n_done % cand_check_interval == 0:
+                    if self._cm_mgr.needs_update(self._state['x_cm'].numpy(),
+                                                  self._state['theta'].numpy()):
+                        self._cm_mgr.update(self._state['x_cm'].numpy(),
+                                             self._state['theta'].numpy(),
+                                             x_all=self._state['x_all'].numpy())
+
+                if n_done % sample_every == 0:
+                    _record(n_done // sample_every)
+
+                if clipped_in_chunk > 0 and not clip_warned:
+                    print(f"NOTE (fire): step clipping engaged "
+                          f"({clipped_in_chunk}/{n_to_do} steps in chunk {chunk_idx} hit "
+                          f"the {max_step_frac*100:.0f}%·r_c_min ceiling). "
+                          f"Consider lowering dt_max if persistent. "
+                          f"(One-shot — won't fire again this call.)")
+                    clip_warned = True
+
+                if verbose and chunk_idx % max(1, n_total_chunks_est // 5) == 0:
+                    elapsed = _time.time() - t0
+                    print(f"    fire chunk {chunk_idx}  step={n_done}/{N}  "
+                          f"({elapsed:.1f}s)")
+
+            if verbose:
+                pct = 100.0 * n_clipped_total / max(N, 1)
+                print(f"  [fire] done: {N} steps, {n_clipped_total} clipped ({pct:.2f}%)  "
+                      f"in {_time.time()-t0:.1f}s")
+
+        finally:
+            self._restore_damping(damp_snap)
+            self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+            self._state['omega'] = tf.zeros_like(self._state['omega'])
+            self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
 
         return self
 
