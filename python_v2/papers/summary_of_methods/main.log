@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.4.28)  29 APR 2026 12:40
+This is pdfTeX, Version 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian) (preloaded format=pdflatex 2026.4.28)  9 MAY 2026 18:21
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -573,129 +573,167 @@ Class revtex4-2 Warning: Deferred float stuck during \clearpage processing.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 395.
+(hyperref)                removing `math shift' on input line 391.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 395.
+(hyperref)                removing `subscript' on input line 391.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 409.
+(hyperref)                removing `math shift' on input line 391.
 
 
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 409.
+LaTeX Warning: Reference `eq:freg' on page 4 undefined on input line 403.
 
 
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 409.
+Underfull \hbox (badness 1968) in paragraph at lines 423--434
+[]\OT1/cmr/bx/n/10 (+20) Exclusion from rigid-body sums. \OT1/cmr/m/n/10 (+20) 
+Be-cause
+ []
 
 
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 448.
-
-
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 448.
+LaTeX Warning: Reference `eq:freg' on page 4 undefined on input line 436.
 
 [4 <./figures/ellipse_conservation.png>]
-<figures/bending_mode_and_cor.png, id=343, 458.1918pt x 207.6558pt>
+
+LaTeX Warning: Reference `eq:slide_error' on page 5 undefined on input line 489
+.
+
+
+LaTeX Warning: Reference `tab:kreg_error' on page 5 undefined on input line 490
+.
+
+
+Overfull \hbox (43.26479pt too wide) in alignment at lines 506--521
+ [] [] [] [] 
+ []
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 542.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 542.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 556.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `subscript' on input line 556.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 556.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 595.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 595.
+
+[5]
+<figures/bending_mode_and_cor.png, id=353, 458.1918pt x 207.6558pt>
 File: figures/bending_mode_and_cor.png Graphic file (type png)
 <use figures/bending_mode_and_cor.png>
-Package pdftex.def Info: figures/bending_mode_and_cor.png  used on input line 5
-80.
+Package pdftex.def Info: figures/bending_mode_and_cor.png  used on input line 7
+27.
 (pdftex.def)             Requested size: 246.0pt x 111.48923pt.
- [5 <./figures/bending_mode_and_cor.png>]
-Underfull \hbox (badness 1163) in paragraph at lines 648--657
+ [6 <./figures/bending_mode_and_cor.png>]
+Underfull \hbox (badness 1163) in paragraph at lines 795--804
 []\OT1/cmr/m/n/10 (+20) A cen-tral re-sult is that the perime-ter \OT1/cmr/m/it
 /10 (+20) shape \OT1/cmr/m/n/10 (+20) at
  []
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 658.
+(hyperref)                removing `math shift' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\Delta' on input line 658.
+(hyperref)                removing `\Delta' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 658.
+(hyperref)                removing `math shift' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 658.
+(hyperref)                removing `math shift' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\nu' on input line 658.
+(hyperref)                removing `\nu' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 658.
+(hyperref)                removing `subscript' on input line 805.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 658.
+(hyperref)                removing `math shift' on input line 805.
 
-<figures/fixed_b_sweep.png, id=368, 1140.9024pt x 354.6048pt>
+<figures/fixed_b_sweep.png, id=378, 1140.9024pt x 354.6048pt>
 File: figures/fixed_b_sweep.png Graphic file (type png)
 <use figures/fixed_b_sweep.png>
-Package pdftex.def Info: figures/fixed_b_sweep.png  used on input line 672.
+Package pdftex.def Info: figures/fixed_b_sweep.png  used on input line 819.
 (pdftex.def)             Requested size: 346.79626pt x 107.78906pt.
-<figures/perimeter_overlay.png, id=369, 1151.9838pt x 392.667pt>
+<figures/perimeter_overlay.png, id=379, 1151.9838pt x 392.667pt>
 File: figures/perimeter_overlay.png Graphic file (type png)
 <use figures/perimeter_overlay.png>
-Package pdftex.def Info: figures/perimeter_overlay.png  used on input line 673.
+Package pdftex.def Info: figures/perimeter_overlay.png  used on input line 820.
 
 (pdftex.def)             Requested size: 346.79626pt x 118.20844pt.
-<figures/calib_dA_nu_trajectory.png, id=370, 497.2176pt x 423.984pt>
+<figures/calib_dA_nu_trajectory.png, id=380, 497.2176pt x 423.984pt>
 File: figures/calib_dA_nu_trajectory.png Graphic file (type png)
 <use figures/calib_dA_nu_trajectory.png>
 Package pdftex.def Info: figures/calib_dA_nu_trajectory.png  used on input line
- 689.
+ 836.
 (pdftex.def)             Requested size: 246.0pt x 209.77243pt.
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 700.
+(hyperref)                removing `math shift' on input line 847.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 700.
+(hyperref)                removing `math shift' on input line 847.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 740.
+(hyperref)                removing `math shift' on input line 887.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\varepsilon' on input line 740.
+(hyperref)                removing `\varepsilon' on input line 887.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 740.
+(hyperref)                removing `subscript' on input line 887.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 740.
+(hyperref)                removing `math shift' on input line 887.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 740.
+(hyperref)                removing `math shift' on input line 887.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 740.
+(hyperref)                removing `math shift' on input line 887.
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 742--745
+Underfull \hbox (badness 10000) in paragraph at lines 889--892
 []\OT1/cmr/m/n/10 (+20) Figure []5[] shows the cal-i-bra-tion curves at
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 742--745
+Underfull \hbox (badness 10000) in paragraph at lines 889--892
 \OML/cmm/m/it/10 N \OMS/cmsy/m/n/10 2 f\OT1/cmr/m/n/10 (+20) 32\OML/cmm/m/it/10
  ; \OT1/cmr/m/n/10 (+20) 48\OML/cmm/m/it/10 ; \OT1/cmr/m/n/10 (+20) 72\OML/cmm/
 m/it/10 ; \OT1/cmr/m/n/10 (+20) 120\OML/cmm/m/it/10 ; \OT1/cmr/m/n/10 (+20) 240
@@ -704,224 +742,224 @@ cmsy/m/n/10 2
  []
 
 
-Underfull \hbox (badness 4441) in paragraph at lines 746--754
+Underfull \hbox (badness 4441) in paragraph at lines 893--901
 []\OT1/cmr/m/it/10 (+20) N-sensitivity: \OT1/cmr/m/n/10 (+20) Ex-tend-ing the s
 weep to $\OML/cmm/m/it/10 N \OMS/cmsy/m/n/10 2
  []
 
-[6]
-<figures/calib_N_sensitivity.png, id=391, 1003.1076pt x 390.258pt>
+[7]
+<figures/calib_N_sensitivity.png, id=401, 1003.1076pt x 390.258pt>
 File: figures/calib_N_sensitivity.png Graphic file (type png)
 <use figures/calib_N_sensitivity.png>
-Package pdftex.def Info: figures/calib_N_sensitivity.png  used on input line 77
-3.
+Package pdftex.def Info: figures/calib_N_sensitivity.png  used on input line 92
+0.
 (pdftex.def)             Requested size: 346.79626pt x 134.91902pt.
-<figures/calib_eps_sensitivity.png, id=392, 1003.1076pt x 390.258pt>
+<figures/calib_eps_sensitivity.png, id=402, 1003.1076pt x 390.258pt>
 File: figures/calib_eps_sensitivity.png Graphic file (type png)
 <use figures/calib_eps_sensitivity.png>
 Package pdftex.def Info: figures/calib_eps_sensitivity.png  used on input line 
-774.
+921.
 (pdftex.def)             Requested size: 346.79626pt x 134.91902pt.
-<figures/calib_N_drift.png, id=393, 1004.553pt x 350.7504pt>
+<figures/calib_N_drift.png, id=403, 1004.553pt x 350.7504pt>
 File: figures/calib_N_drift.png Graphic file (type png)
 <use figures/calib_N_drift.png>
-Package pdftex.def Info: figures/calib_N_drift.png  used on input line 812.
+Package pdftex.def Info: figures/calib_N_drift.png  used on input line 959.
 (pdftex.def)             Requested size: 246.0pt x 85.8891pt.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 854.
+(hyperref)                removing `math shift' on input line 1001.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\nu' on input line 854.
+(hyperref)                removing `\nu' on input line 1001.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 854.
+(hyperref)                removing `subscript' on input line 1001.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\to' on input line 854.
+(hyperref)                removing `\to' on input line 1001.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 854.
+(hyperref)                removing `math shift' on input line 1001.
 
-[7 <./figures/fixed_b_sweep.png> <./figures/perimeter_overlay.png> <./figures/c
+[8 <./figures/fixed_b_sweep.png> <./figures/perimeter_overlay.png> <./figures/c
 alib_dA_nu_trajectory.png>]
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 873.
+(hyperref)                removing `math shift' on input line 1020.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 873.
+(hyperref)                removing `subscript' on input line 1020.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 873.
+(hyperref)                removing `math shift' on input line 1020.
 
-<figures/R0_spot_check.png, id=410, 1293.633pt x 391.7034pt>
+<figures/R0_spot_check.png, id=419, 1293.633pt x 391.7034pt>
 File: figures/R0_spot_check.png Graphic file (type png)
 <use figures/R0_spot_check.png>
-Package pdftex.def Info: figures/R0_spot_check.png  used on input line 883.
+Package pdftex.def Info: figures/R0_spot_check.png  used on input line 1030.
 (pdftex.def)             Requested size: 246.0pt x 74.48418pt.
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 922.
+(hyperref)                removing `math shift' on input line 1069.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\delta' on input line 922.
+(hyperref)                removing `\delta' on input line 1069.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 922.
+(hyperref)                removing `math shift' on input line 1069.
 
-[8 <./figures/calib_N_sensitivity.png> <./figures/calib_eps_sensitivity.png> <.
+[9 <./figures/calib_N_sensitivity.png> <./figures/calib_eps_sensitivity.png> <.
 /figures/calib_N_drift.png> <./figures/R0_spot_check.png>]
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 934.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1081.
 
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 934.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1081.
 
 
 Class revtex4-2 Warning: Deferred float stuck during \clearpage processing.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 957.
+(hyperref)                removing `math shift' on input line 1104.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 957.
+(hyperref)                removing `math shift' on input line 1104.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 957.
+(hyperref)                removing `math shift' on input line 1104.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 957.
+(hyperref)                removing `math shift' on input line 1104.
 
-<figures/fd_fits_paper.png, id=431, 697.807pt x 508.299pt>
+<figures/fd_fits_paper.png, id=442, 697.807pt x 508.299pt>
 File: figures/fd_fits_paper.png Graphic file (type png)
 <use figures/fd_fits_paper.png>
-Package pdftex.def Info: figures/fd_fits_paper.png  used on input line 999.
+Package pdftex.def Info: figures/fd_fits_paper.png  used on input line 1146.
 (pdftex.def)             Requested size: 510.0pt x 371.50502pt.
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 1012.
+(hyperref)                removing `math shift' on input line 1159.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 1012.
+(hyperref)                removing `math shift' on input line 1159.
 
-[9] [10 <./figures/fd_fits_paper.png>]
-Underfull \hbox (badness 1735) in paragraph at lines 1150--1155
+[10] [11 <./figures/fd_fits_paper.png>]
+Underfull \hbox (badness 1735) in paragraph at lines 1297--1302
 \OT1/cmr/m/n/10 (+20) The re-sult-ing out-ward pres-sure force per node is
  []
 
-[11]
-Overfull \hbox (32.55296pt too wide) in alignment at lines 1191--1198
+[12]
+Overfull \hbox (32.55296pt too wide) in alignment at lines 1338--1345
  [] [] [] [] 
  []
 
 
-Overfull \hbox (74.49138pt too wide) detected at line 1273
+Overfull \hbox (74.49138pt too wide) detected at line 1420
 [][]\OML/cmm/m/it/10 ![] \OT1/cmr/m/n/10 = 2\OML/cmm/m/it/10 :\OT1/cmr/m/n/10 9
 27 \OML/cmm/m/it/10 ^^\[] \OT1/cmr/m/n/10 (3\OML/cmm/m/it/10 :\OT1/cmr/m/n/10 5
 % []\OML/cmm/m/it/10 ;  []\OT1/cmr/m/n/10 )\OML/cmm/m/it/10 :
  []
 
-[12]
-<figures/emulsion_capwave.png, id=494, 722.7pt x 289.08pt>
+[13]
+<figures/emulsion_capwave.png, id=507, 722.7pt x 289.08pt>
 File: figures/emulsion_capwave.png Graphic file (type png)
 <use figures/emulsion_capwave.png>
-Package pdftex.def Info: figures/emulsion_capwave.png  used on input line 1302.
+Package pdftex.def Info: figures/emulsion_capwave.png  used on input line 1449.
 
 (pdftex.def)             Requested size: 246.0pt x 98.40057pt.
-<figures/emulsion_t1.png, id=497, 939.51pt x 397.485pt>
+<figures/emulsion_t1.png, id=510, 939.51pt x 397.485pt>
 File: figures/emulsion_t1.png Graphic file (type png)
 <use figures/emulsion_t1.png>
-Package pdftex.def Info: figures/emulsion_t1.png  used on input line 1361.
+Package pdftex.def Info: figures/emulsion_t1.png  used on input line 1508.
 (pdftex.def)             Requested size: 510.0pt x 215.76682pt.
- [13 <./figures/emulsion_capwave.png>]
-<figures/emulsion_fall_traj.png, id=513, 505.89pt x 325.215pt>
+ [14 <./figures/emulsion_capwave.png>]
+<figures/emulsion_fall_traj.png, id=524, 505.89pt x 325.215pt>
 File: figures/emulsion_fall_traj.png Graphic file (type png)
 <use figures/emulsion_fall_traj.png>
-Package pdftex.def Info: figures/emulsion_fall_traj.png  used on input line 143
-6.
+Package pdftex.def Info: figures/emulsion_fall_traj.png  used on input line 158
+3.
 (pdftex.def)             Requested size: 246.0pt x 158.14592pt.
-<figures/emulsion_fall_sag.png, id=514, 650.43pt x 274.626pt>
+<figures/emulsion_fall_sag.png, id=525, 650.43pt x 274.626pt>
 File: figures/emulsion_fall_sag.png Graphic file (type png)
 <use figures/emulsion_fall_sag.png>
-Package pdftex.def Info: figures/emulsion_fall_sag.png  used on input line 1453
+Package pdftex.def Info: figures/emulsion_fall_sag.png  used on input line 1600
 .
 (pdftex.def)             Requested size: 246.0pt x 103.86449pt.
- [14 <./figures/emulsion_t1.png> <./figures/emulsion_fall_traj.png>]
+ [15 <./figures/emulsion_t1.png> <./figures/emulsion_fall_traj.png>]
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1490.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1637.
 
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1490.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1637.
 
 
 Class revtex4-2 Warning: Deferred float stuck during \clearpage processing.
 
 
-Underfull \hbox (badness 2197) in paragraph at lines 1532--1537
+Underfull \hbox (badness 2197) in paragraph at lines 1679--1684
 []\OT1/cmr/bx/n/10 (+20) Background flow pre-sets. \OT1/cmr/m/n/10 (+20) To pre
 -serve the
  []
 
-[15 <./figures/emulsion_fall_sag.png>]
-<figures/drag_terminal_velocity.png, id=555, 397.485pt x 361.35pt>
+[16 <./figures/emulsion_fall_sag.png>]
+<figures/drag_terminal_velocity.png, id=568, 397.485pt x 361.35pt>
 File: figures/drag_terminal_velocity.png Graphic file (type png)
 <use figures/drag_terminal_velocity.png>
 Package pdftex.def Info: figures/drag_terminal_velocity.png  used on input line
- 1640.
+ 1787.
 (pdftex.def)             Requested size: 191.8797pt x 174.4385pt.
-<figures/drag_flow_tracking.png, id=557, 469.755pt x 289.08pt>
+<figures/drag_flow_tracking.png, id=570, 469.755pt x 289.08pt>
 File: figures/drag_flow_tracking.png Graphic file (type png)
 <use figures/drag_flow_tracking.png>
-Package pdftex.def Info: figures/drag_flow_tracking.png  used on input line 166
-3.
+Package pdftex.def Info: figures/drag_flow_tracking.png  used on input line 181
+0.
 (pdftex.def)             Requested size: 216.4812pt x 133.2166pt.
 
-Overfull \hbox (99.76004pt too wide) in alignment at lines 1696--1715
+Overfull \hbox (99.76004pt too wide) in alignment at lines 1843--1862
  [] [] [] [] 
  []
 
 
-Overfull \hbox (15.3593pt too wide) in paragraph at lines 1731--1735
+Overfull \hbox (15.3593pt too wide) in paragraph at lines 1878--1882
 []\OT1/cmr/bx/n/10 (-20) Movie S12 \OT1/cmr/m/n/10 (-20) (\OT1/cmtt/m/n/10 movi
 es/S12[]terminal[]velocity[]drag.gif\OT1/cmr/m/n/10 (-20) ):
  []
 
-[16 <./figures/drag_terminal_velocity.png> <./figures/drag_flow_tracking.png>]
+[17 <./figures/drag_terminal_velocity.png> <./figures/drag_flow_tracking.png>]
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1735.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1882.
 
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1735.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 1882.
 
 
 Class revtex4-2 Warning: Deferred float stuck during \clearpage processing.
 
-<figures/hopper_testbed.png, id=573, 463.0098pt x 640.3122pt>
+<figures/hopper_testbed.png, id=586, 463.0098pt x 640.3122pt>
 File: figures/hopper_testbed.png Graphic file (type png)
 <use figures/hopper_testbed.png>
-Package pdftex.def Info: figures/hopper_testbed.png  used on input line 1780.
+Package pdftex.def Info: figures/hopper_testbed.png  used on input line 1927.
 (pdftex.def)             Requested size: 135.30075pt x 187.11224pt.
 
-Overfull \hbox (75.33575pt too wide) detected at line 1820
+Overfull \hbox (75.33575pt too wide) detected at line 1967
 [][]\OML/cmm/m/it/10 ^^Z[] \OT1/cmr/m/n/10 = []  [] \OML/cmm/m/it/10 ;
  []
 
-[17 <./figures/hopper_testbed.png>]
+[18 <./figures/hopper_testbed.png>]
 
 LaTeX Warning: `h' float specifier changed to `ht'.
 
@@ -931,23 +969,23 @@ LaTeX Warning: `h' float specifier changed to `ht'.
 
 LaTeX Warning: `h' float specifier changed to `ht'.
 
-[18]
+[19]
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1990.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 2137.
 
 
-LaTeX Warning: A float is stuck (cannot be placed) on input line 1990.
+LaTeX Warning: A float is stuck (cannot be placed) on input line 2137.
 
 
 Class revtex4-2 Warning: Deferred float stuck during \clearpage processing.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 1992.
+(hyperref)                removing `math shift' on input line 2139.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 1992.
+(hyperref)                removing `math shift' on input line 2139.
 
 (./main.bbl
 Underfull \hbox (badness 10000) in paragraph at lines 143--148
@@ -1009,7 +1047,7 @@ Overfull \hbox (29.01532pt too wide) in paragraph at lines 189--194
 /cmr/m/n/9 (-20) . 
  []
 
-[19]
+[20]
 Underfull \hbox (badness 10000) in paragraph at lines 271--276
  []\OT1/cmr/m/n/9 (+20) R. Note, \OT1/cmtt/m/n/9 src/validation/test[]E[]stokes
 []drag.py\OT1/cmr/m/n/9 (+20) ,
@@ -1020,49 +1058,67 @@ Overfull \hbox (25.40953pt too wide) in paragraph at lines 271--276
  \OT1/cmtt/m/n/9 papers/summary[]of[]methods/scripts/test[]E[]stokes[]drag.py
  []
 
-) [20] (./main.aux)
+) [21] (./main.aux)
+
+LaTeX Warning: There were undefined references.
+
 
 LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
 
-Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 77547F42D2B57E7820EE56F15F96F0E8;12260.
+
+Package rerunfilecheck Warning: File `main.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `main.out':
+(rerunfilecheck)             Before: 873DB67553EBC2D0D9A9E42718C066EE;12318
+(rerunfilecheck)             After:  11C6C43E73C8CFA2FD33978C9705AEBC;12738.
  ) 
 Here is how much of TeX's memory you used:
- 16316 strings out of 480247
- 245406 string characters out of 5896151
- 715564 words of memory out of 5000000
- 33591 multiletter control sequences out of 15000+600000
- 485622 words of font info for 194 fonts, out of 8000000 for 9000
+ 16347 strings out of 480247
+ 245734 string characters out of 5896151
+ 715966 words of memory out of 5000000
+ 33599 multiletter control sequences out of 15000+600000
+ 486463 words of font info for 202 fonts, out of 8000000 for 9000
  14 hyphenation exceptions out of 8191
  60i,12n,63p,1038b,1080s stack positions out of 5000i,500n,10000p,200000b,80000s
- </home/kend/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1000.600p
-k></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></us
-r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/shar
-e/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texli
-ve/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/tex
-mf-dist/fonts/type1/public/amsfonts/cmextra/cmex9.pfb></usr/share/texlive/texmf
--dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/
-fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/share/texlive/texmf-dist/fonts/t
-ype1/public/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/pu
-blic/amsfonts/cm/cmmi9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/am
-sfonts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/
-cm/cmr5.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.
-pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></us
-r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/
-texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texliv
-e/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/share/texlive/texmf
--dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/f
-onts/type1/public/amsfonts/cm/cmsy9.pfb></usr/share/texlive/texmf-dist/fonts/ty
-pe1/public/amsfonts/cm/cmti10.pfb></usr/share/texlive/texmf-dist/fonts/type1/pu
-blic/amsfonts/cm/cmti9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/am
-sfonts/cm/cmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts
-/cm/cmtt8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmt
-t9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msam1
-0.pfb>
-Output written on main.pdf (20 pages, 2220023 bytes).
+pdfTeX warning (dest): name{equation.12.41} has been referenced but does not 
+exist, replaced by a fixed one
+
+pdfTeX warning (dest): name{equation.5.15} has been referenced but does not exi
+st, replaced by a fixed one
+
+pdfTeX warning (dest): name{equation.8.26} has been referenced but does not exi
+st, replaced by a fixed one
+
+ </home/kend/.texlive2021/texmf-var/fonts/pk/ljfour/jknappen/ec/tcrm1000.600pk>
+</usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/
+share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/
+texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texlive
+/texmf-dist/fonts/type1/public/amsfonts/cm/cmcsc10.pfb></usr/share/texlive/texm
+f-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/texmf-dist
+/fonts/type1/public/amsfonts/cmextra/cmex9.pfb></usr/share/texlive/texmf-dist/f
+onts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/t
+ype1/public/amsfonts/cm/cmmi6.pfb></usr/share/texlive/texmf-dist/fonts/type1/pu
+blic/amsfonts/cm/cmmi7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/am
+sfonts/cm/cmmi9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/
+cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5
+.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></u
+sr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share
+/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texlive
+/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf
+-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/share/texlive/texmf-dist/f
+onts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/fonts/ty
+pe1/public/amsfonts/cm/cmsy9.pfb></usr/share/texlive/texmf-dist/fonts/type1/pub
+lic/amsfonts/cm/cmti10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/am
+sfonts/cm/cmti9.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/
+cm/cmtt10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmt
+t8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
+</usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msam10.pfb>
+Output written on main.pdf (21 pages, 2239445 bytes).
 PDF statistics:
- 751 PDF objects out of 1000 (max. 8388607)
- 633 compressed objects within 7 object streams
- 196 named destinations out of 1000 (max. 500000)
- 32806 words of extra memory for PDF output out of 35830 (max. 10000000)
+ 769 PDF objects out of 1000 (max. 8388607)
+ 648 compressed objects within 7 object streams
+ 204 named destinations out of 1000 (max. 500000)
+ 34854 words of extra memory for PDF output out of 35830 (max. 10000000)
 

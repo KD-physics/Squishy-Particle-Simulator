@@ -387,6 +387,153 @@ The magnitude decreases as $N^{-1/2}$ (fewer nodes span the contact arc at
 larger $N$), and is negligible ($J_t/J_n < 0.01$) for $\theta < 20^\circ$
 at $N \geq 32$.
 
+\subsection{Perimeter regularization $k_{\rm reg}$: pseudo-force formulation
+and discretization error}
+\label{sec:kreg}
+
+To prevent perimeter nodes from clustering or thinning during long
+simulations, we add a soft \emph{spacing} pseudo-force at each node:
+\begin{equation}
+  \mathbf{F}_{\rm reg}[n] = k_{\rm reg}\,\frac{1}{2}(L^+_n - L^-_n)\,\hat{t}_n,
+\label{eq:freg}
+\end{equation}
+where $L^+_n = |\mathbf{x}_{n+1} - \mathbf{x}_n|$ and
+$L^-_n = |\mathbf{x}_n - \mathbf{x}_{n-1}|$ are the forward and backward
+edge lengths at node $n$, and $\hat{t}_n$ is the bisector tangent
+(average of the two adjacent edge unit tangents). Equation~(\ref{eq:freg})
+pushes a node forward along the local perimeter direction when its
+forward edge is longer, redistributing the spacing toward the equilibrium
+$L^+ = L^-$ (uniform edge lengths).
+
+\textbf{Non-conservativity.}
+$\mathbf{F}_{\rm reg}$ is \emph{not} the gradient of any scalar potential.
+Direct verification: the symmetry condition
+$\partial F_{{\rm reg},i}/\partial x_j = \partial F_{{\rm reg},j}/\partial x_i$
+required for $\mathbf{F}_{\rm reg} = -\nabla U_{\rm reg}$ fails for off-diagonal
+node pairs. Consequently $\mathbf{F}_{\rm reg}$ does not strictly conserve
+energy; the work it performs on a sliding node is not balanced against any
+underlying $U_{\rm reg}$. In the damped physics integrator the
+unaccounted work is dissipated by drag and is bounded well below
+thermal-noise scale; in gradient-based optimization workflows used for
+energy minimization or initial-condition preparation, the system simply
+seeks the configuration where
+$\mathbf{F}_{\rm phys} + \mathbf{F}_{\rm reg} = 0$ at every node, which
+is well-posed independent of conservativity.
+
+\textbf{Exclusion from rigid-body sums.}
+Because $\sum_n \mathbf{F}_{\rm reg}[n]$ is generally non-zero for deformed
+shapes (the per-node tangents weight the telescoping
+$(L^+ - L^-)$ contributions inhomogeneously), including
+$\mathbf{F}_{\rm reg}$ in the rigid-body resultants
+Eq.~(\ref{eq:FT}) would impart spurious translation and rotation. The
+implementation therefore excludes $\mathbf{F}_{\rm reg}$ from
+$\mathbf{F}$ and $T$, applying it only to the elastic displacements
+$\mathbf{u}_i$ in the co-moving frame. Rigid-body motion is driven only
+by Newton-third-law-respecting forces (line tension, area pressure,
+bending, contact, drag).
+
+\textbf{Discretization artifact: straight-line slide vs.\ spline resample.}
+The pseudo-force Eq.~(\ref{eq:freg}) slides node $n$ along its bisector
+tangent $\hat{t}_n$. Geometrically this is a \emph{straight-line} translation
+in space, whereas the ``true'' resample of node $n$ along the local
+perimeter contour follows a curved path. For a node sitting on a smooth
+arc with curvature $\kappa$, sliding along the tangent by $\Delta$
+deviates from the arc by
+\begin{equation}
+  \delta \;\approx\; \frac{1}{2}\Delta^2 \kappa,
+\label{eq:slide_error}
+\end{equation}
+in the inward normal direction (sagitta of an arc subtending arc length
+$\Delta$). After the slide, the local curvature, outward normal, and
+adjacent edge lengths at $n$ are all perturbed slightly, propagating
+small errors into the bending, line tension, and contact terms.
+
+A geometrically clean alternative would be to fit a local quadratic
+or cubic spline through $\{\mathbf{x}_{n-1}, \mathbf{x}_n, \mathbf{x}_{n+1}\}$,
+locate the equispaced arclength position $s_n^* = (s_{n-1}+s_{n+1})/2$
+on the spline, and set $\mathbf{x}_n' = \mathbf{C}(s_n^*)$. This is
+exactly on-contour by construction. We do not implement this because
+(i) the magnitude of the artifact is small at typical simulation
+parameters (see below), and (ii) a position-update operator does not
+fit the unified force-based abstraction shared by the physics integrator,
+the rigid-body decomposition, and the gradient-based optimizers.
+
+\textbf{Magnitude estimate.}
+The per-step displacement $\Delta$ from $k_{\rm reg}$ depends on context:
+in the physics integrator at typical $\alpha_d \cdot dt = 0.2$ and
+near-equispaced configurations, $\Delta \lesssim 10^{-4}\,L_0$; in
+gradient optimizers (\textsc{adam} at lr $= 10^{-3}$, \textsc{fire}
+with $dt_{\max} = 0.03$), $\Delta \lesssim 10^{-3}\,L_0$. We consider
+two limiting curvature regimes spanning the expected range
+encountered in dense deformable packings:
+
+\begin{itemize}
+\item \emph{Free perimeter arch under modest pressure} —
+$\kappa \approx 1/(2R_0)$. The arch bulges slightly outward from the
+reference circle; most of the resampling error accumulates here.
+
+\item \emph{Contact patch} — $\kappa \approx 0$. The perimeter is nearly
+straight along the contact arc; sliding along the tangent stays on the
+chord. Effectively zero artifact.
+\end{itemize}
+
+A third regime occupies a small set of nodes:
+
+\begin{itemize}
+\item \emph{Contact-free transition node} — at the boundary between a
+contact arc and a free patch the local effective curvature can be
+$\kappa \sim 1/L_0 \approx N/(2\pi R_0)$ over a single edge, producing
+the largest per-step artifact in the system.
+\end{itemize}
+
+Substituting $\Delta = 10^{-3}$ length units into Eq.~(\ref{eq:slide_error})
+gives the per-step deviations summarized in Table~\ref{tab:kreg_error}.
+The cumulative steady-state deviation is bounded by the elastic restoring
+force timescale $\tau_{\rm restore}$ over which line tension snaps the
+off-curve node back: $\delta_{\rm steady} \approx
+\delta_{\rm step} \cdot \tau_{\rm restore}/\Delta t$, typically a few
+hundred times the per-step value.
+
+\begin{table}[htb]
+\caption{Per-step and steady-state off-contour deviation from
+straight-line $k_{\rm reg}$ slide vs.\ exact spline resample, at
+$\Delta = 10^{-3}\,L_0$ per step (typical optimizer regime).
+The artifact is concentrated at the small fraction of nodes living
+on contact-free transition boundaries, which coincide with the
+\emph{stuck} nodes identified by the per-node force diagnostics.}
+\label{tab:kreg_error}
+\begin{ruledtabular}
+\begin{tabular}{lccl}
+  Region & Curvature $\kappa$ & $\delta_{\rm step}$ & $\delta_{\rm steady}$ \\
+\hline
+  Free arch interior (modest pressure)
+    & $1/(2R_0) \approx 0.5$
+    & $2.5 \times 10^{-7}$
+    & $\sim 10^{-5}$ \\
+  Contact patch interior
+    & $\approx 0$
+    & $0$
+    & $0$ \\
+  Contact-free transition node
+    & $\sim 1/L_0 \approx 10$
+    & $5 \times 10^{-6}$
+    & $\sim 10^{-3}$ \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+\textbf{Practical implications.}
+For dynamic shear or hopper simulations with drive forces of order
+$10^{-2}$--$10^{-1}$, the regularization artifact is several orders of
+magnitude below noise. For initial-condition preparation in jammed
+packings, where one may push $\|F\|_\infty$ below $10^{-3}$, the
+contribution from contact-free transition nodes becomes comparable to
+the achievable floor and contributes meaningfully to the \emph{stuck}
+set identified by per-node force diagnostics. Reducing $k_{\rm reg}$
+suppresses the artifact at the cost of slower equispacing maintenance;
+adopting a spline-based resample operator would eliminate it at the
+cost of a position-update step outside the force-flow abstraction.
+
 %%============================================================
 \section{Dimensional Analysis and Parameter Reduction}
 \label{sec:dimanalysis}
