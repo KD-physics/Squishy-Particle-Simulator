@@ -2432,7 +2432,8 @@ class System:
     def make_movie(self, output_path, fps=10, n_arc=6,
                    xlim=None, ylim=None, title=None,
                    bitrate=None, dpi=120,
-                   frames=None, callback_data=None):
+                   frames=None, callback_data=None,
+                   mark_node=None):
         """
         Render an animated movie from self.frames and self.callback_data.
 
@@ -2456,6 +2457,14 @@ class System:
         bitrate : int or None  – ffmpeg target bitrate in kbps (mp4/webm only).
                                  None → matplotlib default (~1024 kbps for h264).
         dpi     : int          – figure dpi for rasterisation (default 120).
+        mark_node : int or None – if int (e.g., 0), overlay a black dot at node
+                                  index `mark_node` of each particle's perimeter
+                                  on the primary copy. Diagnostic for
+                                  node-circulation drift: if the dot stays roughly
+                                  in the same body-frame position across frames
+                                  the parameterization is stable; if it walks
+                                  around the contour the regularizer or optimizer
+                                  is inducing tangential drift around the perimeter.
         """
         import matplotlib
         matplotlib.use('Agg')
@@ -2564,6 +2573,13 @@ class System:
                 ax_sim.add_patch(pat)
                 row.append(pat)
             p_patches.append(row)
+
+        # Optional: marker dots on a chosen perimeter node of each particle —
+        # diagnostic for node-circulation drift around the contour.
+        node_mark_scatter = None
+        if mark_node is not None:
+            node_mark_scatter = ax_sim.scatter(
+                np.zeros(P), np.zeros(P), s=25, c='k', zorder=10, marker='o')
 
         # Object artists (one Line2D or Circle per primitive; created at t0)
         obj_artists = []   # list of (obj, artist, kind, prim_idx_in_obj)
@@ -2686,9 +2702,16 @@ class System:
             # Overlay text
             txt.set_text(cbd.get('text', ''))
 
+            # Update node-marker positions (uses primary copy only)
+            if node_mark_scatter is not None:
+                pts = fr['x_all'][:, mark_node, :]   # (P, 2)
+                node_mark_scatter.set_offsets(pts)
+
             artists = all_p_patches + [a for (_, a, _, _) in obj_artists] + [txt]
             if box_outline is not None:
                 artists.append(box_outline)
+            if node_mark_scatter is not None:
+                artists.append(node_mark_scatter)
 
             # Time series
             if has_ts:
