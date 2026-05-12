@@ -435,6 +435,14 @@ class System:
         # 2. Build TF state + params
         state, params = make_state(particles)
 
+        # k_reg decoupling flag — Python bool, read by step_rb_tf at trace time.
+        # Default True (post-2026-05-12 reconcile): k_reg treated as a per-step
+        # parameterization slide that does NOT enter u_dot. Eliminates the
+        # spurious tangential momentum accumulation and drag-on-resampling
+        # artifacts. Set s._decouple_kreg = False to recover pre-2026-05-12
+        # behavior (legacy / reproducibility only).
+        params['_decouple_kreg'] = bool(getattr(self, '_decouple_kreg', True))
+
         if self._config['periodic_x'] or self._config['periodic_y']:
             set_periodic_box(params, self.Lx, self.Ly,
                               periodic_x=self._config['periodic_x'],
@@ -1660,6 +1668,51 @@ class System:
             lr_t    = tf.constant(lr,    dtype=DTYPE)
             one     = tf.constant(1.0,   dtype=DTYPE)
 
+            # Freeze / drive constraints — honor driven_mask + shape_frozen + traj.
+            #   driven_mask[p]=1 → CM motion = v_user·dt_const (override gradient)
+            #   shape_frozen[p]=1 → per-particle residual (rotation + deformation) = 0
+            #   traj DC components used (v_dc_x, v_dc_y, omega_orbit_dc, r_ref)
+            # AC components and spin (ws) are ignored — gradient-step optimizers don't
+            # have a coherent rotational mode, and AC eval requires accurate time
+            # tracking under adaptive dt. For prescribed AC/spin motion, use s.run().
+            _driven_p = self._params.get('driven_mask',  tf.zeros([P_], dtype=DTYPE))
+            _frozen_p = self._params.get('shape_frozen', tf.zeros([P_], dtype=DTYPE))
+            _traj_t   = self._params.get('traj',         tf.zeros([P_, 18], dtype=DTYPE))
+            driven_3d = tf.reshape(_driven_p, [-1, 1, 1])
+            frozen_3d = tf.reshape(_frozen_p, [-1, 1, 1])
+            v_dc      = tf.stack([_traj_t[:, 0], _traj_t[:, 4]], axis=1)   # (P, 2)
+            wo_dc     = _traj_t[:, 12]                                       # (P,)
+            r_ref     = _traj_t[:, 16:18]                                    # (P, 2)
+            # Zero-mean force subtraction is only meaningful when ALL particles
+            # are free. Its purpose is to kill the small k_reg-induced global
+            # translation drift via averaging across particles (Newton's 3rd-law
+            # contact pairs mostly cancel; k_reg is the remainder). When ANY
+            # particle is flagged driven/frozen, the flagged particles anchor
+            # the system — there's no global drift, and subtracting any mean
+            # would project away the free particle's CM motion mode, leaving
+            # only its deformation modes. So we skip zero-mean entirely under
+            # any freeze/drive flag. Decided at Python (trace) time.
+            _any_flagged = bool(np.any(_driven_p.numpy() > 0.5) or
+                                 np.any(_frozen_p.numpy() > 0.5))
+            do_zero_mean = not _any_flagged
+
+            def _v_prescribed():
+                """v_user (P, 2): DC translation + DC orbital. Spin / AC omitted."""
+                x_cm_cur = tf.reduce_mean(x_var, axis=1)
+                dx = x_cm_cur - r_ref
+                v_orb = wo_dc[:, None] * tf.stack([-dx[:, 1], dx[:, 0]], axis=1)
+                return v_dc + v_orb
+
+            def _apply_freeze(delta):
+                """Constrain a per-node delta: override CM-mode for driven, zero
+                residual for shape_frozen. Identity when no flags set."""
+                delta_cm  = tf.reduce_mean(delta, axis=1, keepdims=True)
+                delta_res = delta - delta_cm
+                delta_cm_pres = _v_prescribed()[:, None, :] * dt_const
+                delta_cm_final  = (one - driven_3d) * delta_cm + driven_3d * delta_cm_pres
+                delta_res_final = (one - frozen_3d) * delta_res
+                return tf.broadcast_to(delta_cm_final, delta.shape) + delta_res_final
+
             def force_fn(x, caps):
                 f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 if prim is not None:
@@ -1672,14 +1725,13 @@ class System:
                 clipped = tf.constant(0, dtype=tf.int32)
                 for _ in tf.range(n_steps):
                     f = force_fn(x_var, caps)
-                    # Zero-mean gradient: subtract per-axis mean over all nodes.
-                    # k_reg has non-zero net per-particle (it's projected out of the
-                    # physics RB integrator); without removing it, ADAM's m
-                    # accumulates a translation bias that drifts the whole system
-                    # across periodic boundaries — wasted optimizer effort in a
-                    # direction that doesn't reduce U.
+                    # Zero-mean gradient — only when no particles are flagged
+                    # (see do_zero_mean rationale above).
                     grad_raw = -f
-                    grad = grad_raw - tf.reduce_mean(grad_raw, axis=(0, 1), keepdims=True)
+                    if do_zero_mean:
+                        grad = grad_raw - tf.reduce_mean(grad_raw, axis=(0, 1), keepdims=True)
+                    else:
+                        grad = grad_raw
                     t_var.assign_add(1)
                     m_var.assign(beta1_t * m_var + (one - beta1_t) * grad)
                     v_varad.assign(beta2_t * v_varad + (one - beta2_t) * grad * grad)
@@ -1695,6 +1747,9 @@ class System:
                         scale = tf.minimum(one, max_step_lim / (max_d + eps_t))
                         clipped = clipped + tf.cast(scale < one, tf.int32)
                         adam_delta = adam_delta * scale
+
+                    # Honor freeze / drive flags (identity when none set)
+                    adam_delta = _apply_freeze(adam_delta)
 
                     # Box compression (mirrors kernel's CM affine update on x_cm)
                     x_cm = tf.reduce_mean(x_var, axis=1, keepdims=True)
@@ -1866,6 +1921,45 @@ class System:
             alpha_start_t = tf.constant(alpha_start, dtype=DTYPE)
             N_min_t  = tf.constant(N_min,  dtype=tf.int32)
 
+            # Freeze / drive constraints — honor driven_mask + shape_frozen + traj.
+            #   driven_mask[p]=1 → v_var CM-mode replaced by v_user
+            #   shape_frozen[p]=1 → v_var per-particle residual zeroed
+            #   traj DC components used (v_dc_x, v_dc_y, omega_orbit_dc, r_ref)
+            # AC components and spin (ws) ignored — see s.adam() for rationale.
+            # After velocity update each step, v_var is reprojected onto the
+            # constraint manifold; fire_delta = dt_var · v_var then automatically
+            # respects the freeze/drive flags. NOTE: FIRE's velocity-reset (when
+            # Pn ≤ 0) momentarily zeros prescribed velocities; they're restored on
+            # the very next step via the constraint reprojection.
+            _driven_p = self._params.get('driven_mask',  tf.zeros([P_], dtype=DTYPE))
+            _frozen_p = self._params.get('shape_frozen', tf.zeros([P_], dtype=DTYPE))
+            _traj_t   = self._params.get('traj',         tf.zeros([P_, 18], dtype=DTYPE))
+            driven_3d = tf.reshape(_driven_p, [-1, 1, 1])
+            frozen_3d = tf.reshape(_frozen_p, [-1, 1, 1])
+            v_dc      = tf.stack([_traj_t[:, 0], _traj_t[:, 4]], axis=1)   # (P, 2)
+            wo_dc     = _traj_t[:, 12]                                       # (P,)
+            r_ref     = _traj_t[:, 16:18]                                    # (P, 2)
+            # Skip zero-mean force when any particle is flagged (see s.adam rationale).
+            _any_flagged = bool(np.any(_driven_p.numpy() > 0.5) or
+                                 np.any(_frozen_p.numpy() > 0.5))
+            do_zero_mean = not _any_flagged
+
+            def _v_prescribed():
+                """v_user (P, 2): DC translation + DC orbital."""
+                x_cm_cur = tf.reduce_mean(x_var, axis=1)
+                dx = x_cm_cur - r_ref
+                v_orb = wo_dc[:, None] * tf.stack([-dx[:, 1], dx[:, 0]], axis=1)
+                return v_dc + v_orb
+
+            def _apply_freeze_v(v):
+                """Constrain a velocity tensor: override CM for driven, zero residual for frozen."""
+                v_cm  = tf.reduce_mean(v, axis=1, keepdims=True)
+                v_res = v - v_cm
+                v_cm_pres = _v_prescribed()[:, None, :]
+                v_cm_final  = (one - driven_3d) * v_cm + driven_3d * v_cm_pres
+                v_res_final = (one - frozen_3d) * v_res
+                return tf.broadcast_to(v_cm_final, v.shape) + v_res_final
+
             def force_fn(x, caps):
                 f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
                 if prim is not None:
@@ -1878,9 +1972,10 @@ class System:
                 clipped = tf.constant(0, dtype=tf.int32)
                 for _ in tf.range(n_steps):
                     f_raw = force_fn(x_var, caps)
-                    # Zero-mean force (same reason as ADAM — kill translation drift
-                    # from k_reg / numerical accumulation in periodic systems).
-                    f = f_raw - tf.reduce_mean(f_raw, axis=(0, 1), keepdims=True)
+                    if do_zero_mean:
+                        f = f_raw - tf.reduce_mean(f_raw, axis=(0, 1), keepdims=True)
+                    else:
+                        f = f_raw
                     Pn = tf.reduce_sum(f * v_var)
                     # F3: mix v toward F̂
                     v_norm = tf.sqrt(tf.reduce_sum(v_var * v_var) + tiny)
@@ -1900,6 +1995,8 @@ class System:
 
                     # F6: Verlet position step
                     v_var.assign_add(dt_var * f)
+                    # Honor freeze / drive flags (identity when none set)
+                    v_var.assign(_apply_freeze_v(v_var))
                     fire_delta = dt_var * v_var
 
                     # Clip FIRE step only (box compression is exact; clipping it
@@ -1989,6 +2086,158 @@ class System:
             self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
 
         return self
+
+    def lbfgs(self, max_iter, sample_every=None, callback=None, record_initial=True,
+              cand_check_interval=30, verbose=True,
+              gtol=1e-20, ftol=1e-20, maxfun_mult=10):
+        """
+        L-BFGS-B minimization of 0.5·∥F∥² (force-norm objective) with
+        self-consistent gradient via tf.GradientTape on the force kernel.
+        Mirror of s.adam() / s.fire() in scaffolding (frames, callbacks,
+        PRCM refresh, freeze flags).
+
+        Honors driven_mask + shape_frozen by treating EITHER flag as "lock
+        in place" — the flagged particle's full per-node positions are held
+        at their values at entry to lbfgs() and reverted defensively after
+        every scipy evaluation. Prescribed motion (non-zero traj) is NOT
+        advanced — L-BFGS-B has no natural step count to apply v_user·dt
+        against. For prescribed-motion driving use s.adam() or s.fire().
+
+        Parameters
+        ----------
+        max_iter            : int — scipy L-BFGS-B maxiter (one "iter" may
+                              involve several f_and_grad evaluations)
+        sample_every        : int — record cadence in scipy f-evaluations
+                              (default: max_iter*maxfun_mult, i.e. one record)
+        callback            : callable(sys) → dict or None
+        record_initial      : bool
+        cand_check_interval : int — PRCM refresh cadence in f-evaluations
+        verbose             : bool
+        gtol, ftol          : scipy L-BFGS-B convergence tolerances
+        maxfun_mult         : maxfun = max_iter * maxfun_mult
+
+        Returns
+        -------
+        int : scipy res.nit (number of L-BFGS iterations performed)
+        """
+        import time as _time
+        import tensorflow as tf
+        import numpy as np
+        from scipy.optimize import minimize
+        from src.simulation.tf_sim import (internal_forces_tf, k_reg_forces_tf,
+                                             inter_capsule_forces_tf, primitive_forces_tf)
+        DTYPE = self._state['x_all'].dtype
+        P_, N_ = int(self._state['x_all'].shape[0]), int(self._state['x_all'].shape[1])
+        SHAPE  = (P_, N_, 2)
+        if sample_every is None: sample_every = max_iter * maxfun_mult
+
+        # Snapshot positions for locked DOFs; zero velocities; zero damping
+        x_init   = self._state['x_all'].numpy().copy()
+        theta_np = self._state['theta'].numpy()
+        self._cm_mgr.update(self._state['x_cm'].numpy(), theta_np, x_all=x_init)
+
+        self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+        self._state['omega'] = tf.zeros_like(self._state['omega'])
+        self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
+        damp_snap = self._save_damping()
+        self._zero_damping_for_optimizer()
+
+        try:
+            # Lock-mask: EITHER driven_mask OR shape_frozen → lock in place
+            _driven_np = self._params.get('driven_mask',  tf.zeros([P_], dtype=DTYPE)).numpy()
+            _frozen_np = self._params.get('shape_frozen', tf.zeros([P_], dtype=DTYPE)).numpy()
+            locked_p   = (_driven_np > 0.5) | (_frozen_np > 0.5)
+            lock_mask3d = np.zeros(SHAPE, dtype=x_init.dtype)
+            lock_mask3d[locked_p, :, :] = 1.0
+            free_mask3d  = 1.0 - lock_mask3d
+            free_mask_tf = tf.constant(free_mask3d, dtype=DTYPE)
+
+            # Warn if user passed non-zero traj — LBFGS doesn't advance prescribed motion
+            if 'traj' in self._params:
+                _traj_np = self._params['traj'].numpy()
+                _has_motion = np.any(np.abs(_traj_np[locked_p]) > 0)
+                if _has_motion and verbose:
+                    print("  [lbfgs] NOTE: non-zero traj on locked particles will NOT be "
+                          "advanced by lbfgs() (use s.adam() / s.fire() for prescribed motion).")
+
+            # Force kernel — graph closure
+            r_c_flat = tf.repeat(self._params['r_c_per_p'], N_)
+            k_c_flat = tf.repeat(self._params['k_c_per_p'], N_)
+            L0_flat  = tf.repeat(self._params['L0'],        N_)
+            prim     = self._prim_data
+            box_t    = self._params.get('box', None)
+
+            def force_diff(x_all, caps):
+                f_c = inter_capsule_forces_tf(x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box_t)
+                if prim is not None:
+                    f_c = f_c + primitive_forces_tf(x_all, tf.constant(0.0, dtype=DTYPE),
+                                                     prim, r_c_flat, k_c_flat, L0_flat, box=box_t)
+                return (internal_forces_tf(x_all, self._params, 0.0)
+                        + k_reg_forces_tf(x_all, self._params) + f_c)
+
+            if record_initial:
+                self.frames.append(self.snapshot())
+                cbd = callback(self) if callback is not None else {}
+                self.callback_data.append(cbd if cbd is not None else {})
+
+            n_evals     = [0]
+            last_record = [0]
+
+            def f_and_grad(x_flat):
+                n_evals[0] += 1
+                x_full = x_flat.reshape(SHAPE).astype(x_init.dtype)
+                # Defense in depth: restore locked DOFs to snapshot
+                x_full = free_mask3d * x_full + lock_mask3d * x_init
+
+                # PRCM refresh on evaluation cadence
+                if n_evals[0] % cand_check_interval == 0:
+                    if self._cm_mgr.needs_update(x_full.mean(axis=1), theta_np):
+                        self._cm_mgr.update(x_full.mean(axis=1), theta_np, x_all=x_full)
+
+                caps    = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
+                x_local = tf.Variable(tf.constant(x_full, dtype=DTYPE), trainable=True)
+                with tf.GradientTape() as tape:
+                    F = force_diff(x_local, caps) * free_mask_tf
+                    L = 0.5 * tf.reduce_sum(F * F)
+                grad = tape.gradient(L, x_local).numpy() * free_mask3d
+
+                # Write state so callbacks/snapshots see it
+                self._state['x_all'] = tf.constant(x_full, dtype=DTYPE)
+                self._state['x_cm']  = tf.reduce_mean(self._state['x_all'], axis=1)
+
+                # Sampling
+                if n_evals[0] % sample_every == 0:
+                    idx_now = n_evals[0] // sample_every
+                    if idx_now > last_record[0]:
+                        self.frames.append(self.snapshot())
+                        cbd = callback(self) if callback is not None else {}
+                        self.callback_data.append(cbd if cbd is not None else {})
+                        last_record[0] = idx_now
+
+                return float(L.numpy()), grad.reshape(-1)
+
+            t0 = _time.time()
+            res = minimize(f_and_grad, x_init.reshape(-1), method='L-BFGS-B', jac=True,
+                           options={'maxiter': max_iter,
+                                    'maxfun':  max_iter * maxfun_mult,
+                                    'gtol': gtol, 'ftol': ftol, 'disp': False})
+            wall = _time.time() - t0
+
+            # Final writeback — ensure locked DOFs are exact
+            x_final = res.x.reshape(SHAPE).astype(x_init.dtype)
+            x_final = free_mask3d * x_final + lock_mask3d * x_init
+            self._state['x_all'] = tf.constant(x_final, dtype=DTYPE)
+            self._state['x_cm']  = tf.reduce_mean(self._state['x_all'], axis=1)
+
+            if verbose:
+                print(f"  [lbfgs] {res.nit} iters, {n_evals[0]} evals  "
+                      f"L_final={res.fun:.3e}  in {wall:.1f}s")
+            return int(res.nit)
+        finally:
+            self._restore_damping(damp_snap)
+            self._state['v_cm']  = tf.zeros_like(self._state['v_cm'])
+            self._state['omega'] = tf.zeros_like(self._state['omega'])
+            self._state['u_dot'] = tf.zeros_like(self._state['u_dot'])
 
     def _check_disp_watchdog(self, ratio, chunk_idx):
         """Stability watchdog — fires when max_closing_ratio_chunk
@@ -2201,6 +2450,22 @@ class System:
 
         set_driven(self._params, list(indices), list(traj_rows),
                    frozen=frozen_flags)
+        return self
+
+    def clear_driven_particles(self):
+        """
+        Clear all driven_mask, shape_frozen, and traj flags — restore every
+        particle to free-motion / free-shape. Inverse of set_driven_particles().
+
+        Returns self.
+        """
+        import tensorflow as tf
+        from src.simulation.tf_sim import DTYPE
+        P = len(self._particles)
+        self._params['driven_mask']  = tf.zeros([P],     dtype=DTYPE)
+        self._params['shape_frozen'] = tf.zeros([P],     dtype=DTYPE)
+        self._params['traj']         = tf.zeros([P, 18], dtype=DTYPE)
+        # u_frozen retained — harmless when shape_frozen is zero
         return self
 
     # ── checkpoint ────────────────────────────────────────────────────────────
