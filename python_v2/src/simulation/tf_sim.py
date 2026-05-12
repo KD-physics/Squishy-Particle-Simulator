@@ -387,23 +387,54 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
     # ── deviatoric force → elastic deformation ────────────────────────────────
     # Frozen branch: f_dev = f_phys - F_phys/N  where F_phys = F_total (sum of ALL forces)
     N_f   = tf.cast(tf.shape(x)[1], DTYPE)
-    f_dev = f_total - F_total[:, None, :] / N_f                         # (P, N, 2)
 
-    # Rotate f_dev to body frame: R(-θ) = [[c, s], [-s, c]]
+    # k_reg coupling: by default k_reg is integrated into u_dot via f_dev. When
+    # params['_decouple_kreg'] is True (Python bool, set by caller), k_reg is
+    # treated as a per-step parameter slide instead — it adjusts position but
+    # does NOT enter u_dot, so drag (which depends on u_dot via v_node) sees only
+    # the physical motion. Python-time branch → tf.function retraces per value.
+    decouple_kreg = bool(params.get('_decouple_kreg', False))
+
     c = tf.cos(theta_new)[:, None]
     s = tf.sin(theta_new)[:, None]
-    f_bx  =  c * f_dev[:,:,0] + s * f_dev[:,:,1]
-    f_by  = -s * f_dev[:,:,0] + c * f_dev[:,:,1]
-    f_body = tf.stack([f_bx, f_by], axis=2)                             # (P, N, 2)
-
-    # Semi-implicit Euler: u_dot_new = (u_dot + accel·dt) / (1 + α·dt)
-    # Equivalent to:  m·du/dt = f − α·m·u_dot_new  (damping evaluated at the new
-    # velocity instead of the old). Unconditionally stable for any α > 0,
-    # whereas the prior explicit form blew up at α·dt > 2.
-    accel_el  = f_body / m_node[:, None, None]
     inv_factor = 1.0 / (1.0 + alpha_p[:, None, None] * dt)
-    u_dot_el  = (u_dot + accel_el * dt) * inv_factor
-    u_el      = u + u_dot_el * dt
+
+    if not decouple_kreg:
+        # ── ORIGINAL path: bit-exact to pre-change behavior ──
+        f_dev = f_total - F_total[:, None, :] / N_f                         # (P, N, 2)
+
+        # Rotate f_dev to body frame: R(-θ) = [[c, s], [-s, c]]
+        f_bx  =  c * f_dev[:,:,0] + s * f_dev[:,:,1]
+        f_by  = -s * f_dev[:,:,0] + c * f_dev[:,:,1]
+        f_body = tf.stack([f_bx, f_by], axis=2)                             # (P, N, 2)
+
+        # Semi-implicit Euler: u_dot_new = (u_dot + accel·dt) / (1 + α·dt)
+        accel_el  = f_body / m_node[:, None, None]
+        u_dot_el  = (u_dot + accel_el * dt) * inv_factor
+        u_el      = u + u_dot_el * dt
+    else:
+        # ── DECOUPLED path: u_dot evolves from f_phys only; k_reg as position slide ──
+        f_phys     = f_el + f_contact + f_drag
+        F_phys     = tf.reduce_sum(f_phys, axis=1)                          # (P, 2)
+        f_dev_phys = f_phys - F_phys[:, None, :] / N_f
+
+        # Rotate f_dev_phys to body frame
+        f_bx  =  c * f_dev_phys[:,:,0] + s * f_dev_phys[:,:,1]
+        f_by  = -s * f_dev_phys[:,:,0] + c * f_dev_phys[:,:,1]
+        f_body = tf.stack([f_bx, f_by], axis=2)
+
+        # Rotate f_reg to body frame (per-step slide; not integrated as momentum)
+        fr_bx =  c * f_reg[:,:,0] + s * f_reg[:,:,1]
+        fr_by = -s * f_reg[:,:,0] + c * f_reg[:,:,1]
+        f_reg_body = tf.stack([fr_bx, fr_by], axis=2)
+
+        # u_dot updated from physical deviatoric only
+        accel_el  = f_body / m_node[:, None, None]
+        u_dot_el  = (u_dot + accel_el * dt) * inv_factor
+
+        # Position adds the (per-step) k_reg slide on top of the momentum
+        v_reg_body = f_reg_body / m_node[:, None, None]
+        u_el       = u + u_dot_el * dt + v_reg_body * dt
 
     # Shape-freeze: lock elastic DOFs to frozen reference shape (not necessarily zero)
     if 'shape_frozen' in params:
