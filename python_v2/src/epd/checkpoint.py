@@ -271,15 +271,16 @@ def save_checkpoint(path, system):
 
     # 2. Config
     config_data = {
-        'Lx':           float(system.Lx),
-        'Ly':           float(system.Ly),
-        'periodic_x':   cfg['periodic_x'],
-        'periodic_y':   cfg['periodic_y'],
-        'dt':           float(system._dt),
-        'alpha_damp':   float(system._alpha_damp),
-        'skin':         float(system._skin),
-        'E_candidates': int(system._E_candidates),
-        'g':            float(getattr(system, '_g_val', 0.0)),
+        'Lx':             float(system.Lx),
+        'Ly':             float(system.Ly),
+        'periodic_x':     cfg['periodic_x'],
+        'periodic_y':     cfg['periodic_y'],
+        'dt':             float(system._dt),
+        'alpha_damp':     float(system._alpha_damp),
+        'skin':           float(system._skin),
+        'E_candidates':   int(system._E_candidates),
+        'g':              float(getattr(system, '_g_val', 0.0)),
+        'candidacy_kind': getattr(system, '_candidacy_kind', 'production'),
     }
     with open(path / 'config.json', 'w') as f:
         json.dump(config_data, f, indent=2)
@@ -426,20 +427,39 @@ def load_checkpoint(path, system=None):
         idx2 += sp.count
     params['shape_frozen'] = tf.constant(_frozen, dtype=DTYPE)
 
-    # Rebuild CandidacyManager
+    # Rebuild candidacy manager — must use the SAME kind that was active at
+    # save time. PRCM and production manager have different algorithms; mixing
+    # them silently produces incomplete candidacies at high phi (real contacts
+    # get evicted by spurious ones, hitting E capacity).
     P = len(particles)
     N = particles[0].N
     R0_arr = np.array([p.R0 for p in particles])
-    from src.simulation.candidacy_manager import CandidacyManager
-    cm_mgr = CandidacyManager(
-        P=P, N=N, R0=float(np.mean(R0_arr)), E=cfg['E_candidates'],
-        skin=cfg['skin'],
-        periodic=cfg['periodic_x'] and cfg['periodic_y'],
-        periodic_x=cfg['periodic_x'], periodic_y=cfg['periodic_y'],
-        Lx=cfg['Lx'], Ly=cfg['Ly'],
-        R0_arr=R0_arr,
-    )
-    cm_mgr.update(x_cm_np, state_npz['theta'])
+    candidacy_kind = cfg.get('candidacy_kind', 'production')
+    sys_new._candidacy_kind = candidacy_kind
+    if candidacy_kind == 'prcm':
+        from src.simulation.pair_registration_cm import PairRegistrationCM
+        r_c_arr = np.array([p.r_c for p in particles])
+        cm_mgr = PairRegistrationCM(
+            P=P, N=N, R0_arr=R0_arr, r_c_per_p=r_c_arr,
+            Lx=cfg['Lx'], Ly=cfg['Ly'],
+            M1=20, M2=10,
+            delta=(cfg['E_candidates'] - 1) // 2,
+            periodic_x=cfg['periodic_x'],
+            periodic_y=cfg['periodic_y'])
+    else:
+        from src.simulation.candidacy_manager import CandidacyManager
+        cm_mgr = CandidacyManager(
+            P=P, N=N, R0=float(np.mean(R0_arr)), E=cfg['E_candidates'],
+            skin=cfg['skin'],
+            periodic=cfg['periodic_x'] and cfg['periodic_y'],
+            periodic_x=cfg['periodic_x'], periodic_y=cfg['periodic_y'],
+            Lx=cfg['Lx'], Ly=cfg['Ly'],
+            R0_arr=R0_arr,
+        )
+    # Pass x_all (deformed node positions) so PRCM (which needs them) can
+    # build the right candidacy. Production manager ignores x_all per its docstring.
+    cm_mgr.update(x_cm_np, state_npz['theta'],
+                  x_all=np.ascontiguousarray(state_npz['x_all'], dtype=np.float64))
     sys_new._cm_mgr = cm_mgr
 
     # Build prim_data from objects (re-use if objects were re-registered)

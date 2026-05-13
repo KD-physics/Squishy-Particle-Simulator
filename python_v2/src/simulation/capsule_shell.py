@@ -156,8 +156,11 @@ class CapsuleParticle:
         # Node mass: m_i = rho_d * t * L0  (t = tau * R0)
         self.m_node  = rho_d * (tau * R0) * self.L0
 
-        # Capsule contact radius: r_c = L0 (each edge is a sausage of half-width L0)
-        self.r_c     = self.L0
+        # Capsule contact radius: r_c = L0/2 so adjacent capsule endcaps meet at
+        # the edge midpoints without overlap. (Pre-2026-05-12 used r_c = L0,
+        # which caused 2x overlap of adjacent capsules and double-counting of
+        # contact pairs across shared nodes.)
+        self.r_c     = 0.5 * self.L0
 
         # Reference turning angles at each node (computed from initial positions)
         self.theta0 = self._compute_turning_angles()

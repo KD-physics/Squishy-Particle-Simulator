@@ -70,7 +70,9 @@ def rsa_seed(specs, objects, Lx, Ly, seed=42, max_attempts=50000,
     # Compute effective radii for overlap check
     def _r_eff(spec, R0_i):
         N = spec.N_nodes
-        r_c = 2.0 * R0_i * np.sin(np.pi / N)   # EPD capsule half-gap
+        # r_c = L0/2 = R0·sin(π/N) — adjacent endcaps meet at edge midpoints,
+        # no overlap (matches capsule_shell.py r_c convention since 2026-05-12).
+        r_c = R0_i * np.sin(np.pi / N)
         return R0_i + r_c                         # touching radius
 
     # Compute bounding box for random draws: use tightest 'exterior' container polygon

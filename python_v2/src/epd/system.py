@@ -1105,6 +1105,13 @@ class System:
         step_offset = self.step_count
         phys_state  = {k: v for k, v in self._state.items() if k not in ('t', 'step')}
 
+        # Ensure phys_state carries 'box' — kernel scales it each step alongside
+        # x_cm when box_rate is active, so it MUST live in state (not params)
+        # for the tf.while_loop to track it correctly. Initialize from
+        # params['box'] (the canonical periodic-box config).
+        if 'box' not in phys_state and 'box' in self._params:
+            phys_state['box'] = self._params['box']
+
         R0_arr   = np.array([p.R0 for p in self._particles])
         skin_abs = self._skin * float(np.mean(R0_arr))
         R0_max   = float(np.max(R0_arr))
@@ -1131,6 +1138,21 @@ class System:
         else:
             new_phys_state = result
             diag = None
+
+        # Sync Python-side bookkeeping from final state['box']. The kernel
+        # evolved box each step; pull the final value into self.Lx, self.Ly,
+        # params['box'], and PRCM. This replaces the old sync_box(N) formula.
+        if 'box' in new_phys_state:
+            box_np = new_phys_state['box'].numpy()
+            if self._config['periodic_x'] and box_np[0] > 0:
+                self.Lx = float(box_np[0])
+                if self._cm_mgr is not None:
+                    self._cm_mgr.Lx = self.Lx
+            if self._config['periodic_y'] and box_np[1] > 0:
+                self.Ly = float(box_np[1])
+                if self._cm_mgr is not None:
+                    self._cm_mgr.Ly = self.Ly
+            self._params['box'] = new_phys_state['box']
 
         t_val    = (step_offset + n_steps) * self._dt
         step_val = step_offset + n_steps
@@ -1240,7 +1262,8 @@ class System:
 
         caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
         f_contact = inter_capsule_forces_tf(
-            x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+            x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box,
+            contact_exponent=float(self._params.get('contact_exponent', 1.0)))
         if self._prim_data is not None:
             t0 = tf.constant(0.0, dtype=x_all.dtype)
             f_contact = f_contact + primitive_forces_tf(
@@ -1369,7 +1392,8 @@ class System:
             L0_flat  = tf.repeat(self._params['L0'],        N_nodes)
             box      = self._params.get('box', None)
             caps = tf.constant(self._cm_mgr.CapCandidates, dtype=tf.int32)
-            f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box)
+            f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box,
+                                            contact_exponent=float(self._params.get('contact_exponent', 1.0)))
             if self._prim_data is not None:
                 t0 = tf.constant(0.0, dtype=DTYPE)
                 f_c = f_c + primitive_forces_tf(x, t0, self._prim_data,
@@ -1494,6 +1518,9 @@ class System:
                               use_tf_function=use_tf_function)
             self.diag.append(d)
             self._check_disp_watchdog(d.get('max_closing_ratio_chunk', 0.0), ci + 1)
+            # NOTE: box is now a state variable — run_fast itself syncs
+            # self.Lx/Ly/params['box']/cm_mgr from final state['box']. No
+            # cumulative-rate formula needed here.
             _record(ci + 1)
             if verbose and n_chunks >= 5 and (ci + 1) % max(1, n_chunks // 5) == 0:
                 elapsed = _time.time() - _t0
@@ -1714,7 +1741,8 @@ class System:
                 return tf.broadcast_to(delta_cm_final, delta.shape) + delta_res_final
 
             def force_fn(x, caps):
-                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var,
+                                                contact_exponent=float(self._params.get('contact_exponent', 1.0)))
                 if prim is not None:
                     f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
                                                      prim, r_c_flat, k_c_flat, L0_flat, box=box_var)
@@ -1756,6 +1784,10 @@ class System:
                     box_delta = tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const,
                                                   x_var.shape)
                     x_var.assign_add(adam_delta + box_delta)
+                    # Box also evolves per-step in lockstep with x_cm under box_rate
+                    # so contact-kernel min-image uses the up-to-date box throughout
+                    # the chunk (mirrors the state['box'] refactor in step_full_tf).
+                    box_var.assign(box_var + box_var * rate_var * dt_const)
                 return clipped
 
             inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
@@ -1796,6 +1828,10 @@ class System:
 
                 # Sync box bookkeeping (Lx, params['box'], PRCM box)
                 if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
+                    # box_var has been evolving per-step inside the inner loop;
+                    # propagate its current value back to Python-side bookkeeping
+                    # (Lx, Ly, params['box'], PRCM box) before sync_box overrides it.
+                    self._params['box'] = box_var.read_value()
                     self.sync_box(n_to_do)
                     # Refresh in-graph box_var so min-image sees the new box
                     if self._params.get('box', None) is not None:
@@ -1803,6 +1839,9 @@ class System:
 
                 # Write x_var → self._state (so callback / snapshot see it)
                 self._write_xvar_to_state(x_var)
+                # Mirror box_var back into state['box'] so snapshot/diagnostic
+                # consistency checks see the same box the kernel just used.
+                self._state['box'] = box_var.read_value()
 
                 # PRCM refresh boundary
                 if n_done % cand_check_interval == 0:
@@ -1961,7 +2000,8 @@ class System:
                 return tf.broadcast_to(v_cm_final, v.shape) + v_res_final
 
             def force_fn(x, caps):
-                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var)
+                f_c = inter_capsule_forces_tf(x, caps, r_c_flat, k_c_flat, L0_flat, box=box_var,
+                                                contact_exponent=float(self._params.get('contact_exponent', 1.0)))
                 if prim is not None:
                     f_c = f_c + primitive_forces_tf(x, tf.constant(0.0, dtype=DTYPE),
                                                      prim, r_c_flat, k_c_flat, L0_flat, box=box_var)
@@ -2011,6 +2051,10 @@ class System:
                     box_delta = tf.broadcast_to(x_cm * rate_var[None, None, :] * dt_const,
                                                   x_var.shape)
                     x_var.assign_add(fire_delta + box_delta)
+                    # Box also evolves per-step in lockstep with x_cm under box_rate
+                    # so contact-kernel min-image uses the up-to-date box throughout
+                    # the chunk (mirrors the state['box'] refactor in step_full_tf).
+                    box_var.assign(box_var + box_var * rate_var * dt_const)
                 return clipped
 
             inner_chunk = tf.function(_inner_chunk) if use_tf_function else _inner_chunk
@@ -2045,11 +2089,18 @@ class System:
                 chunk_idx += 1
 
                 if (self._box_rate[0] != 0.0 or self._box_rate[1] != 0.0):
+                    # box_var has been evolving per-step inside the inner loop;
+                    # propagate its current value back to Python-side bookkeeping
+                    # (Lx, Ly, params['box'], PRCM box) before sync_box overrides it.
+                    self._params['box'] = box_var.read_value()
                     self.sync_box(n_to_do)
                     if self._params.get('box', None) is not None:
                         box_var.assign(self._params['box'])
 
                 self._write_xvar_to_state(x_var)
+                # Mirror box_var back into state['box'] so snapshot/diagnostic
+                # consistency checks see the same box the kernel just used.
+                self._state['box'] = box_var.read_value()
 
                 if n_done % cand_check_interval == 0:
                     if self._cm_mgr.needs_update(self._state['x_cm'].numpy(),
@@ -2168,7 +2219,8 @@ class System:
             box_t    = self._params.get('box', None)
 
             def force_diff(x_all, caps):
-                f_c = inter_capsule_forces_tf(x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box_t)
+                f_c = inter_capsule_forces_tf(x_all, caps, r_c_flat, k_c_flat, L0_flat, box=box_t,
+                                                contact_exponent=float(self._params.get('contact_exponent', 1.0)))
                 if prim is not None:
                     f_c = f_c + primitive_forces_tf(x_all, tf.constant(0.0, dtype=DTYPE),
                                                      prim, r_c_flat, k_c_flat, L0_flat, box=box_t)
