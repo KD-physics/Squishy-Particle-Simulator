@@ -169,11 +169,70 @@ where $A$ is the current enclosed area (shoelace formula, exact for the polygon)
 and $A_0$ is the reference polygon area.  As $\Karea \to \infty$, $A \to A_0$.
 
 \subsection{Contact energy}
+\label{sec:contact}
 
-Contact is modeled by a one-sided linear penalty:
-$f_c = k_c |g_i| L_0$ for $g_i < 0$, where $g_i$ is the gap at node $i$ and
-$k_c = C/R_0$.  A 2-point Gauss quadrature along each edge pair accurately
-represents distributed contact pressure across the flattened contact zone.
+Each perimeter edge is treated as a capsule (line segment inflated by the
+contact radius $r_c$) so that contact between two particles reduces to
+checking distance between source-edge sample points and the candidate edges
+of opposing particles.  Two ingredients deserve attention: how distances are
+combined when a source point is close to several candidate edges of the same
+opposing perimeter, and the functional form of the penalty.
+
+\paragraph{Polyline distance via per-pair minimum.}
+For a source Gauss point $x_q$ on particle A and a set of candidate edge
+capsules of particle B, the smooth Minkowski boundary of B's polyline
+inflated by $r_c$ defines a single nearest point, hence a single penalty.
+A naive sum of per-capsule penalties double-counts in vertex-disk regions
+where two adjacent B-capsules overlap, producing a small tangential force
+whose direction depends on which capsule fires.  We therefore reduce each
+$(x_q, \text{opposing particle})$ pair to a single contribution: the
+candidate with minimum capsule distance is selected via a one-pass
+$\texttt{segment\_min}$ over the dense $(K, E)$ candidate tensor; ties
+(common when $x_q$'s closest point is a shared vertex) are split equally
+so the summed contribution is exactly one penalty per polyline contact.
+
+\paragraph{Hertzian penalty.}
+For each surviving pair the force magnitude follows the Hertz contact law
+\begin{equation}
+  f_c = k_c\,|g|^{3/2}\,L_0\,w_g \quad \text{for } g < 0,
+\label{eq:hertz}
+\end{equation}
+with $g$ the perpendicular signed gap (negative when in contact), $L_0$ the
+edge reference length, and $w_g$ the Gauss weight.  The Hertzian exponent
+$3/2$ is the elasticity-theory result for two spheres pressed together
+under small deformation; in our 2D capsule context it serves the additional
+numerical purpose of decoupling the stiffness at typical operating overlap
+from the barrier at full overlap.  Linear penalty ($f \propto g$) has
+constant slope and so couples the two; a power-law $|g|^n$ with $n>1$ gives
+slope $\propto |g|^{n-1}$, soft at small overlap and stiff at deep, with
+the integrated barrier scaling as $|g|^{n+1}/(n+1)$.
+
+\paragraph{Stiffness-matched calibration of $k_c$.}
+The prefactor $k_c$ is fixed by requiring the contact stiffness at the
+typical operating overlap $\eta_\star = (r-d)/r$ to match the line-tension
+stiffness experienced by a perimeter node under perpendicular displacement.
+Setting $\partial f_c/\partial \delta_\perp = \gamma/L_0$ at $\eta = \eta_\star$
+fixes $k_c$ up to dimensionless prefactors; the same calibration that aligns
+the force scales also matches the local Hessian eigenvalues of contact and
+line tension at $\eta_\star$.  A 2-point Gauss quadrature along each edge
+pair represents distributed contact pressure across the flattened contact
+zone accurately at this overlap range.
+
+\paragraph{Why matched stiffness matters.}
+With linear penalty and unmatched $k_c$ the contact and line-tension
+stiffnesses can differ by two orders of magnitude at the operating overlap.
+A gradient step or time-integration step that satisfies stability for the
+stiffer mode is far too small to make progress on the softer mode.  When
+the system approaches mechanical equilibrium the residual imbalance in the
+soft direction sustains a low-amplitude perimeter mode at each contact, and
+the matching frequency between similar contact patches couples these into a
+system-wide small-scale resonance: $|F|_{\max}$ no longer decreases with
+further integration and instead oscillates around a finite floor set by the
+balance of drive (geometric stiffness mismatch) and dissipation.  The
+Hertzian penalty with matched-stiffness $k_c$ collapses this stiffness ratio
+toward unity at the operating overlap, suppressing the resonance and
+allowing residual forces to relax to a marginally-jammed floor several
+orders of magnitude below the linear-penalty plateau.
 
 %%============================================================
 \section{Equations of Motion and Time Integration}

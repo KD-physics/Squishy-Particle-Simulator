@@ -281,6 +281,10 @@ def save_checkpoint(path, system):
         'E_candidates':   int(system._E_candidates),
         'g':              float(getattr(system, '_g_val', 0.0)),
         'candidacy_kind': getattr(system, '_candidacy_kind', 'production'),
+        # Kernel flags that change physics — must persist so loaded state
+        # gives the same forces as saved state.
+        'min_per_polyline': bool(system._params.get('min_per_polyline', True)),
+        'contact_exponent': float(system._params.get('contact_exponent', 1.0)),
     }
     with open(path / 'config.json', 'w') as f:
         json.dump(config_data, f, indent=2)
@@ -461,6 +465,12 @@ def load_checkpoint(path, system=None):
     cm_mgr.update(x_cm_np, state_npz['theta'],
                   x_all=np.ascontiguousarray(state_npz['x_all'], dtype=np.float64))
     sys_new._cm_mgr = cm_mgr
+
+    # Restore kernel physics flags (must match save state for force equivalence)
+    if 'min_per_polyline' in cfg:
+        params['min_per_polyline'] = bool(cfg['min_per_polyline'])
+    if 'contact_exponent' in cfg:
+        params['contact_exponent'] = float(cfg['contact_exponent'])
 
     # Build prim_data from objects (re-use if objects were re-registered)
     from src.simulation.tf_sim import make_prim_data
