@@ -371,18 +371,28 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
 
     # ── continuous box-rate (additive affine compression / expansion) ─────────
     # params['_box_rate_tf'] is (2,) per-axis strain rate [1/time]. Default 0.
-    # When non-zero, particle CMs scale per axis as x_cm ← x_cm·(1 + r·dt). Nodes
-    # follow rigidly because x_all is reconstructed below as (R·body + x_cm_new),
-    # so updating x_cm_new alone propagates correctly.
-    # Box-side bookkeeping (Lx, Ly, params['box']) is updated by the orchestration
-    # layer between sys.run() chunks; per-step box drift inside one chunk is
-    # small (<<1%) for typical rates and PRCM/min-image tolerate that.
-    # Wrapped in tf.cond so cost is ~zero when rate=0.
+    # When non-zero:
+    #   • particle CMs scale: x_cm ← x_cm·(1 + r·dt)
+    #   • box scales in lockstep: box ← box·(1 + r·dt) (per-axis)
+    # Box is carried through `state` (not `params`) so that it updates every
+    # step inside the tf.while_loop, keeping force-kernel min-image and PRCM
+    # box self-consistent with x_cm. Python-side bookkeeping (self.Lx/Ly,
+    # params['box']) is synced once at the end of each run_fast() call from
+    # the final state['box'], not from a cumulative-rate formula.
+    # Nodes follow x_cm rigidly because x_all is reconstructed below as
+    # (R·body + x_cm_new). Wrapped in tf.cond so cost is ~zero when rate=0.
     box_rate = params.get('_box_rate_tf', tf.zeros([2], dtype=DTYPE))
+    # Current box from state (fallback to params['box'] for backward compat)
+    box_cur  = state.get('box', params.get('box', tf.zeros([2], dtype=DTYPE)))
+    rate_active = tf.reduce_any(tf.not_equal(box_rate, 0.0))
     x_cm_new = tf.cond(
-        tf.reduce_any(tf.not_equal(box_rate, 0.0)),
+        rate_active,
         lambda: x_cm_new + x_cm_new * box_rate[None, :] * dt,
         lambda: x_cm_new)
+    box_new = tf.cond(
+        rate_active,
+        lambda: box_cur + box_cur * box_rate * dt,
+        lambda: box_cur)
 
     # ── deviatoric force → elastic deformation ────────────────────────────────
     # Frozen branch: f_dev = f_phys - F_phys/N  where F_phys = F_total (sum of ALL forces)
@@ -472,6 +482,7 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
         u     = u_new,
         u_dot = u_dot_new,
         X_ref = X_ref,
+        box   = box_new,
     )
     metrics = dict(dA_rel=dA_rel, KE_rb=KE_rb, KE_el=KE_el)
     return new_state, metrics
@@ -481,7 +492,8 @@ def step_rb_tf(state, f_contact, dt, alpha_damp, g, params, t=None):
 
 @tf.function(jit_compile=True)
 def inter_capsule_forces_tf(x_all, CapCandidates, r_c_flat, k_c_flat, L0_flat,
-                             box=None):
+                             box=None, min_per_polyline=True,
+                             contact_exponent=1.0):
     """
     TF inter-capsule contact forces from CapCandidates index matrix.
 
@@ -494,6 +506,13 @@ def inter_capsule_forces_tf(x_all, CapCandidates, r_c_flat, k_c_flat, L0_flat,
     k_c_flat      : (K,) DTYPE — contact stiffness per source edge
     L0_flat       : (K,) DTYPE — edge reference length per source edge
     box           : (2,) DTYPE [Lx, Ly] or None — periodic box; None = non-periodic
+    min_per_polyline : bool — if True, replace the per-pair sum over E with a
+        per-(source-Gauss-point, opposing-particle) min reduction. Each Gauss
+        point sees only its single closest candidate edge per opposing particle,
+        eliminating the vertex-region double-count where two adjacent capsules
+        on the same opposing polyline both fire. Yields polyline-distance
+        contact equivalent to the smooth Minkowski boundary. Default False
+        preserves legacy sum-over-pairs behavior.
 
     Returns f_contact : (P, N, 2) DTYPE
     """
@@ -616,8 +635,47 @@ def inter_capsule_forces_tf(x_all, CapCandidates, r_c_flat, k_c_flat, L0_flat,
         d_safe = tf.maximum(d, _eps)
         n_hat  = diff / d_safe[:, :, None]                     # (K, E, 2)
 
-        # Polydisperse force magnitude: k_c comes from source edge's particle
-        F_mag  = k_c_flat[:, None] * (-gap) * L0_flat[:, None] * wg   # (K, E)
+        # ── Optional min-per-(source-Gauss-point, opposing-particle) reduction ──
+        # When enabled, only the single closest candidate edge per opposing
+        # particle contributes to this Gauss point. Eliminates the vertex
+        # double-count where two adjacent B-capsules sharing a vertex both fire.
+        # Ties (Gauss point closest at a vertex shared by two candidates) are
+        # split equally so the summed contribution equals one. See
+        # project_quench_1e-4_floor.md for motivation.
+        if min_per_polyline:
+            _big      = tf.constant(1e30, dtype=dtype)
+            # Mask ghost slots out of the min reduction
+            d_for_min = tf.where(active > _zero, d, tf.fill([K, E], _big))
+            # Segment ID = (source_edge_k, opposing_particle p_b) flattened.
+            # k_idx_2d ∈ [0, K-1], p_b ∈ [0, P-1] → seg_id ∈ [0, K*P-1]
+            k_idx_2d  = tf.tile(tf.range(K, dtype=tf.int32)[:, None], [1, E])
+            seg_id    = k_idx_2d * P + p_b                              # (K, E)
+            seg_flat  = tf.reshape(seg_id, [-1])
+            d_min_flat = tf.math.unsorted_segment_min(
+                tf.reshape(d_for_min, [-1]), seg_flat, K * P)
+            d_min_bc  = tf.reshape(tf.gather(d_min_flat, seg_flat), [K, E])
+            # Winner mask: 1 where this pair's dist equals the segment min
+            is_winner = tf.cast(tf.equal(d, d_min_bc), dtype) * active
+            # Tie split: distribute equally if multiple winners (vertex case)
+            tie_count_flat = tf.math.unsorted_segment_sum(
+                tf.reshape(is_winner, [-1]), seg_flat, K * P)
+            tie_count_bc   = tf.reshape(tf.gather(tie_count_flat, seg_flat),
+                                         [K, E])
+            winner_weight  = is_winner / tf.maximum(tie_count_bc, _one)
+            in_contact     = in_contact * winner_weight
+
+        # Polydisperse force magnitude. Default is linear penalty (n=1, paper);
+        # contact_exponent > 1 gives Hertz-like (n=3/2) or other power-law
+        # penalty, which matches the contact stiffness to line-tension stiffness
+        # at typical operating overlap (better Hessian conditioning, higher
+        # punch-through barrier). Python float baked at trace time.
+        abs_gap = tf.maximum(-gap, _zero)                      # avoid pow(neg, .)
+        if contact_exponent == 1.0:
+            F_mag = k_c_flat[:, None] * abs_gap * L0_flat[:, None] * wg
+        else:
+            F_mag = (k_c_flat[:, None]
+                     * tf.pow(abs_gap, tf.constant(contact_exponent, dtype=dtype))
+                     * L0_flat[:, None] * wg)
         F_mag  = F_mag * in_contact                            # (K, E), ghost/far → 0
         F_vec  = F_mag[:, :, None] * n_hat                    # (K, E, 2)
 
@@ -1163,9 +1221,13 @@ def eval_forces_tf(state, CapCandidates, alpha_damp, g, params,
         t = tf.constant(0.0, dtype=DTYPE)
 
     # contact
+    min_per_polyline = bool(params.get('min_per_polyline', True))
+    contact_exponent = float(params.get('contact_exponent', 1.0))
     f_contact = inter_capsule_forces_tf(
         x, CapCandidates, r_c_flat, k_c_flat, L0_flat,
-        box=params.get('box', None))
+        box=params.get('box', None),
+        min_per_polyline=min_per_polyline,
+        contact_exponent=contact_exponent)
     if prim_data is not None:
         f_contact = f_contact + primitive_forces_tf(
             x, t, prim_data, r_c_flat, k_c_flat, L0_flat,
@@ -1743,9 +1805,19 @@ def step_full_tf(state, CapCandidates, dt, alpha_damp, g, params,
     if t is None:
         t = tf.constant(0.0, dtype=state['x_all'].dtype)
 
-    box = params.get('box', None)
+    # Use state['box'] when available (lockstep with x_cm under box_rate);
+    # fall back to params['box'] for backward compat with state dicts that
+    # don't carry box.
+    box = state.get('box', params.get('box', None))
+    # Per-(Gauss, opposing-polyline) min reduction in inter-capsule contact.
+    # True is the physically-correct default (polyline-distance contact, no
+    # vertex double-count); False reverts to legacy sum-over-capsules.
+    min_per_polyline = bool(params.get('min_per_polyline', True))
+    contact_exponent = float(params.get('contact_exponent', 1.0))
     f_contact = inter_capsule_forces_tf(
-        state['x_all'], CapCandidates, r_c_flat, k_c_flat, L0_flat, box=box)
+        state['x_all'], CapCandidates, r_c_flat, k_c_flat, L0_flat, box=box,
+        min_per_polyline=min_per_polyline,
+        contact_exponent=contact_exponent)
 
     if prim_data is not None:
         f_prim    = primitive_forces_tf(
@@ -2014,6 +2086,12 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     """
     dtype = DTYPE
 
+    # Ensure state0 carries 'box' — kernel scales it each step alongside x_cm
+    # when box_rate is active. If caller didn't include it, copy from params.
+    if 'box' not in state0:
+        state0 = dict(state0)   # shallow copy so we don't mutate caller's dict
+        state0['box'] = params.get('box', tf.zeros([2], dtype=dtype))
+
     # Initial candidacy
     xc0 = np.ascontiguousarray(state0['x_cm'].numpy(), dtype=np.float64)
     th0 = np.ascontiguousarray(state0['theta'].numpy(), dtype=np.float64)
@@ -2044,16 +2122,26 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
     # when nothing has moved).
     mgr_always_update = bool(getattr(mgr_cpp, 'always_update', False))
 
-    def candidacy_step(x_cm, theta, x_all):
+    def candidacy_step(x_cm, theta, x_all, box):
         """Python callback: update C++ candidacy.
 
         x_all is plumbed through for managers that need per-node positions
         (e.g., PRCM). Production CM ignores it.
+
+        box is the CURRENT box from state — when box_rate is active, this
+        evolves every step in the TF loop; we sync mgr_cpp.Lx/Ly here so PRCM
+        rebuilds use the correct periodic dimensions.
         """
         n_cand_checks[0] += 1
         xc = x_cm.numpy()
         th = theta.numpy()
         xa = x_all.numpy()
+        # Sync PRCM box to current state['box'] before update.
+        box_np = box.numpy()
+        if box_np[0] > 0:
+            mgr_cpp.Lx = float(box_np[0])
+        if box_np[1] > 0:
+            mgr_cpp.Ly = float(box_np[1])
         if mgr_always_update:
             should_update = True
         else:
@@ -2074,11 +2162,15 @@ def run_simulation_tf(state0, dt, alpha_damp, g, params, n_steps, mgr_cpp,
 
     def loop_body(state, CapCand, step_idx, max_closing_ratio):
         # Call Python candidacy check every cand_check_interval steps only.
+        # Pass state['box'] so PRCM can sync to the current (compressed) box.
+        box_for_cand = state.get('box', params.get('box',
+                                                    tf.zeros([2], dtype=dtype)))
         new_cand = tf.cond(
             tf.equal(step_idx % cand_interval_tf, 0),
             true_fn=lambda: tf.ensure_shape(
                 tf.py_function(candidacy_step,
-                               [state['x_cm'], state['theta'], state['x_all']],
+                               [state['x_cm'], state['theta'], state['x_all'],
+                                box_for_cand],
                                Tout=tf.int32),
                 [K, E]),
             false_fn=lambda: CapCand,
